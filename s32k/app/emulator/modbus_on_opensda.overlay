@@ -1,0 +1,26 @@
+/*
+ * Test variant: Modbus RTU on the OpenSDA virtual COM port (LPUART6) instead of RS485, so the
+ * server can be tested from a PC without RS485 hardware. The console is turned off
+ * (modbus_on_opensda.conf). Build with:
+ *   west build ... -- -DEXTRA_DTC_OVERLAY_FILE=modbus_on_opensda.overlay -DEXTRA_CONF_FILE=modbus_on_opensda.conf
+ */
+/ {
+	chosen {
+		/delete-property/ zephyr,console;
+		/delete-property/ zephyr,shell-uart;
+	};
+};
+
+&lpuart_7 {
+	status = "disabled";
+	/delete-node/ modbus0;
+};
+
+&lpuart_6 {
+	current-speed = <19200>;
+
+	modbus0 {
+		compatible = "zephyr,modbus-serial";
+		status = "okay";
+	};
+};

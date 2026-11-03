@@ -96,7 +96,16 @@
 		code_partition: partition@100 {
 			compatible = "zephyr,mapped-partition";
 			label = "code-partition";
-			reg = <0x00000100 (DT_SIZE_K(2000) - 0x100)>;
+			reg = <0x00000100 (DT_SIZE_K(1936) - 0x100)>;
+		};
+
+		/* Settings (NVS), last 64 KB of the usable code flash: 8 sectors of 8 KB, in a
+		 * different flash block than the code, so erasing it does not stall execution.
+		 */
+		storage_partition: partition@1e4000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x001e4000 DT_SIZE_K(64)>;
 		};
 	};
 };

@@ -32,6 +32,19 @@
 		};
 	};
 
+	/* LPUART7 -> RS485 for Modbus RTU (SCADA/HA): PTB14 RX, PTB15 TX, DE on PTB17 (GPIO) */
+	pinmux_lpuart_7: pinmux_lpuart_7 {
+		group1 {
+			pinmux = <PTB15_LPUART7_TX_O>;
+			output-enable;
+		};
+
+		group2 {
+			pinmux = <PTB14_LPUART7_RX>;
+			input-enable;
+		};
+	};
+
 	/* FlexCAN0 -> on-board TJA1043, connector J21 (inverter) */
 	pinmux_flexcan_0: pinmux_flexcan_0 {
 		group1 {

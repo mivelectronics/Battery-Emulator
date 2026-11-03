@@ -1,0 +1,28 @@
+/* All three CAN channels; CAN1 (PTB22/23) and CAN4 (PTB3/PTB2) need external transceivers. */
+&flexcan_1 {
+	status = "okay";
+};
+
+&flexcan_4 {
+	status = "okay";
+};
+
+/ {
+	chosen {
+		zephyr,settings-partition = &storage_partition;
+	};
+};
+
+/* Modbus RTU server on RS485: LPUART7 (PTB14 RX, PTB15 TX), driver enable on PTB17 */
+&lpuart_7 {
+	status = "okay";
+	current-speed = <19200>;
+	pinctrl-0 = <&pinmux_lpuart_7>;
+	pinctrl-names = "default";
+
+	modbus0 {
+		compatible = "zephyr,modbus-serial";
+		de-gpios = <&gpiob_h 1 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+};

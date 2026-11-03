@@ -1,0 +1,96 @@
+/*
+ * S32K emulator firmware (MIV variant A+). The S32K runs on its own: CAN channels, settings in
+ * NVS, Modbus RTU server for SCADA/HA. The ESP32 network module is optional and talks over the
+ * link UART (today: CAN bridge for the unmodified Battery-Emulator on the ESP32).
+ *
+ * Next steps (FIRMWARE_PLAN.md): Battery-Emulator drivers and datalayer on this side, datalayer
+ * and settings exchange with the ESP32.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+#include <zephyr/kernel.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/printk.h>
+#include <string.h>
+
+#include "be_cfg.h"
+#include "can_io.h"
+#include "link.h"
+#include "modbus_srv.h"
+
+static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
+
+static void on_link_frame(const struct be_link_frame *f)
+{
+	/* CMD from the ESP32 (bridge mode): set the bit rate of a channel, stored in NVS */
+	if (f->type == BE_LINK_CMD) {
+		struct be_link_cmd c = {0};
+
+		memcpy(&c, f->payload, MIN(f->len, sizeof(c)));
+		if (c.code == 1) {
+			uint8_t iface = c.arg0 & 0xFF;
+			struct be_cfg next = be_cfg;
+			int err = -EINVAL;
+
+			if (iface < BE_NUM_CAN) {
+				next.can[iface].nominal_kbps = (uint16_t)(c.arg0 >> 8);
+				next.can[iface].data_kbps = (uint16_t)c.arg1;
+				next.can[iface].enabled = 1;
+				err = 0;
+				if (memcmp(&next, &be_cfg, sizeof(next)) != 0) {
+					err = be_cfg_save(&next);
+				}
+				if (err == 0) {
+					err = can_io_apply(iface);
+				}
+			}
+			struct be_link_ack a = {.acked_type = f->type, .acked_seq = f->seq,
+						.status = (int16_t)err};
+
+			link_send(BE_LINK_ACK, &a, sizeof(a));
+		}
+	}
+}
+
+int main(void)
+{
+	printk("\n=== BE S32K emulator (A+) on %s ===\n", CONFIG_BOARD_TARGET);
+
+	if (gpio_is_ready_dt(&led)) {
+		gpio_pin_configure_dt(&led, GPIO_OUTPUT_INACTIVE);
+	}
+	be_cfg_init();
+	can_io_init(link_queue_can_rx);
+	if (link_init(on_link_frame)) {
+		printk("link UART not ready\n");
+	}
+	modbus_srv_init();
+
+	int64_t next_led = k_uptime_get(), next_stats = k_uptime_get() + 5000;
+
+	while (1) {
+		link_poll(K_MSEC(50));
+
+		int64_t now = k_uptime_get();
+
+		if (now >= next_led) {
+			next_led += 500;
+			if (gpio_is_ready_dt(&led)) {
+				gpio_pin_toggle_dt(&led);
+			}
+		}
+		if (now >= next_stats) {
+			next_stats += 10000;
+			const struct be_link_stats *ls = link_rx_stats();
+
+			printk("cfg rev %u | link tx %u rx %u B ok %u peer %d | can rx %u/%u/%u "
+			       "tx %u/%u/%u err %u/%u/%u\n",
+			       be_cfg.revision, link_stats.tx_frames, link_stats.rx_bytes,
+			       ls->frames_ok, link_peer_alive(), can_io_stats[0].rx,
+			       can_io_stats[1].rx, can_io_stats[2].rx, can_io_stats[0].tx_ok,
+			       can_io_stats[1].tx_ok, can_io_stats[2].tx_ok, can_io_stats[0].tx_err,
+			       can_io_stats[1].tx_err, can_io_stats[2].tx_err);
+		}
+	}
+	return 0;
+}

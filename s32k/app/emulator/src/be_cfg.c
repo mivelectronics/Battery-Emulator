@@ -1,0 +1,127 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+#include "be_cfg.h"
+
+#include <errno.h>
+#include <string.h>
+#include <zephyr/kernel.h>
+#include <zephyr/settings/settings.h>
+#include <zephyr/sys/printk.h>
+
+struct be_cfg be_cfg;
+
+static struct be_cfg loaded;
+static bool loaded_valid;
+
+void be_cfg_defaults(struct be_cfg *cfg)
+{
+	memset(cfg, 0, sizeof(*cfg));
+	cfg->version = BE_CFG_VERSION;
+	/* CAN0: inverter, classic CAN 500 kbit/s. CAN1/CAN4: batteries, CAN FD 500k/2M */
+	cfg->can[0] = (struct be_cfg_can){.nominal_kbps = 500, .data_kbps = 0, .enabled = 1};
+	cfg->can[1] = (struct be_cfg_can){.nominal_kbps = 500, .data_kbps = 2000, .enabled = 1};
+	cfg->can[2] = (struct be_cfg_can){.nominal_kbps = 500, .data_kbps = 2000, .enabled = 1};
+	cfg->mb_unit_id = 1;
+	cfg->mb_parity = 2; /* Modbus RTU default: 8E1 */
+	cfg->mb_baud_div100 = 192;
+}
+
+int be_cfg_validate(const struct be_cfg *cfg)
+{
+	static const uint16_t nominal_ok[] = {100, 125, 200, 250, 500, 800, 1000};
+
+	for (int i = 0; i < BE_NUM_CAN; i++) {
+		const struct be_cfg_can *c = &cfg->can[i];
+		bool ok = false;
+
+		for (size_t k = 0; k < ARRAY_SIZE(nominal_ok); k++) {
+			ok |= c->nominal_kbps == nominal_ok[k];
+		}
+		if (!ok || c->enabled > 1) {
+			return -EINVAL;
+		}
+		if (c->data_kbps != 0 && (c->data_kbps < c->nominal_kbps || c->data_kbps > 5000)) {
+			return -EINVAL;
+		}
+	}
+	if (cfg->mb_unit_id < 1 || cfg->mb_unit_id > 247 || cfg->mb_parity > 2) {
+		return -EINVAL;
+	}
+	switch (cfg->mb_baud_div100) {
+	case 96: case 192: case 384: case 576: case 1152:
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+
+static int be_settings_set(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg)
+{
+	if (strcmp(name, "cfg") != 0) {
+		return -ENOENT;
+	}
+	struct be_cfg tmp;
+
+	be_cfg_defaults(&tmp);
+	/* Older/newer layouts: take the common prefix, the rest stays at the defaults */
+	ssize_t n = read_cb(cb_arg, &tmp, MIN(len, sizeof(tmp)));
+
+	if (n < (ssize_t)sizeof(uint16_t)) {
+		return -EINVAL;
+	}
+	tmp.version = BE_CFG_VERSION;
+	if (be_cfg_validate(&tmp) == 0) {
+		loaded = tmp;
+		loaded_valid = true;
+	}
+	return 0;
+}
+
+SETTINGS_STATIC_HANDLER_DEFINE(be, "be", NULL, be_settings_set, NULL, NULL);
+
+int be_cfg_reload(struct be_cfg *cfg)
+{
+	loaded_valid = false;
+	int err = settings_load_subtree("be");
+
+	if (err == 0 && loaded_valid) {
+		*cfg = loaded;
+		return 0;
+	}
+	be_cfg_defaults(cfg);
+	return err ? err : -ENOENT;
+}
+
+int be_cfg_init(void)
+{
+	int err = settings_subsys_init();
+
+	if (err) {
+		printk("settings init failed: %d, using defaults\n", err);
+		be_cfg_defaults(&be_cfg);
+		return err;
+	}
+	err = be_cfg_reload(&be_cfg);
+	printk("config: %s, revision %u\n", err ? "defaults" : "loaded from NVS", be_cfg.revision);
+	return 0;
+}
+
+int be_cfg_save(const struct be_cfg *cfg)
+{
+	struct be_cfg tmp = *cfg;
+	int err = be_cfg_validate(&tmp);
+
+	if (err) {
+		return err;
+	}
+	tmp.version = BE_CFG_VERSION;
+	tmp.revision = be_cfg.revision + 1;
+	err = settings_save_one("be/cfg", &tmp, sizeof(tmp));
+	if (err) {
+		return err;
+	}
+	be_cfg = tmp;
+	return 0;
+}
