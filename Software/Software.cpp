@@ -21,6 +21,7 @@
 #include "src/datalayer/datalayer.h"
 #include "src/devboard/display/display.h"
 #include "src/devboard/espnow/espnow.h"
+#include "src/devboard/ethernet/eth_w5500.h"
 #include "src/devboard/mqtt/mqtt.h"
 #include "src/devboard/safety/parallel_safety.h"
 #include "src/devboard/safety/safety.h"
@@ -41,7 +42,7 @@
 #include "src/inverter/INVERTERS.h"
 
 #if !defined(HW_LILYGO) && !defined(HW_LILYGO2CAN) && !defined(HW_STARK) && !defined(HW_3LB) && !defined(HW_BECOM) && \
-    !defined(HW_WAVESHARE) && !defined(HW_DEVKIT) && !defined(HW_DFROBOT_EDGE101)
+    !defined(HW_WAVESHARE) && !defined(HW_DEVKIT) && !defined(HW_DFROBOT_EDGE101) && !defined(HW_MIV_ESP32ETH)
 #error You must select a target hardware!
 #endif
 
@@ -98,6 +99,9 @@ void init_serial() {
 
 void connectivity_loop(void*) {
   esp_task_wdt_add(NULL);  // Register this task with WDT
+#ifdef ETHERNET_W5500
+  init_Ethernet_W5500();  // before WiFi, like upstream PR #2833
+#endif
   // Init wifi
   init_WiFi();
 

@@ -1,0 +1,9 @@
+/* Bridge: all three CAN channels on. CAN1 (PTB22/23) and CAN4 (PTB3/PTB2) need external
+ * transceivers on the headers. */
+&flexcan_1 {
+	status = "okay";
+};
+
+&flexcan_4 {
+	status = "okay";
+};

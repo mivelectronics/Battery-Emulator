@@ -1,0 +1,27 @@
+*** Booting Zephyr OS build v4.5.0 ***
+
+=== BE S32K bring-up on frdm_a_s32k312/mcxe317 ===
+SystemCoreClock: 120000000 Hz, sys clock: 120000000 Hz
+CAN0 core clock: 60000000 Hz
+CAN0 RX id=0x123 dlc=8 len=8 data0=01
+CAN0 RX id=0x456 dlc=15 len=64 FD BRS data0=02
+Loopback: rx=2 (fd=1) -> PASS
+Before normal mode: CAN0_RX(PTA6)=1 ERR_N(PTC23)=0
+CAN0 normal mode, 500k/2M FD, heartbeat 0x7E0 every 1 s
+  diag 0: RX=1 ERR_N=0 state=0 tec=0 rec=0 ticks=0
+  diag 1: RX=1 ERR_N=0 state=0 tec=0 rec=0 ticks=0
+  diag 2: RX=1 ERR_N=0 state=0 tec=0 rec=0 ticks=0
+  diag 3: RX=1 ERR_N=0 state=0 tec=0 rec=0 ticks=0
+  diag 4: RX=1 ERR_N=0 state=0 tec=0 rec=0 ticks=0
+t=2s 10ms timer: 100 ticks, period min 9998 us max 10007 us | CAN0 state=0 tec=0 rec=0 send=0 tx_ok=2 tx_err=0 rx=2
+t=3s 10ms timer: 201 ticks, period min 9992 us max 10007 us | CAN0 state=2 tec=128 rec=0 send=0 tx_ok=2 tx_err=0 rx=2
+t=4s 10ms timer: 302 ticks, period min 9997 us max 10002 us | CAN0 state=2 tec=128 rec=0 send=0 tx_ok=2 tx_err=0 rx=2
+t=5s 10ms timer: 403 ticks, period min 9999 us max 10000 us | CAN0 state=2 tec=128 rec=0 send=0 tx_ok=2 tx_err=0 rx=2
+t=6s 10ms timer: 504 ticks, period min 9993 us max 10006 us | CAN0 state=2 tec=128 rec=0 send=0 tx_ok=2 tx_err=0 rx=2
+t=7s 10ms timer: 605 ticks, period min 9994 us max 10005 us | CAN0 state=2 tec=128 rec=0 send=0 tx_ok=2 tx_err=0 rx=2
+t=8s 10ms timer: 706 ticks, period min 9998 us max 10001 us | CAN0 state=2 tec=128 rec=0 send=0 tx_ok=2 tx_err=0 rx=2
+t=9s 10ms timer: 807 ticks, period min 9999 us max 10000 us | CAN0 state=2 tec=128 rec=0 send=0 tx_ok=2 tx_err=0 rx=2
+t=10s 10ms timer: 908 ticks, period min 9992 us max 10007 us | CAN0 state=2 tec=128 rec=0 send=0 tx_ok=2 tx_err=0 rx=2
+t=11s 10ms timer: 1019 ticks, period min 9994 us max 10005 us | CAN0 state=2 tec=128 rec=0 send=-11 tx_ok=2 tx_err=0 rx=2
+t=12s 10ms timer: 1130 ticks, period min 9999 us max 10000 us | CAN0 state=2 tec=128 rec=0 send=-11 tx_ok=2 tx_err=0 rx=2
+t=13s 10ms timer: 1241 ticks, period min 9999 us max 10000 us | CAN0 state=2 tec=128 rec=0 send=-11 tx_ok=2 tx_err=0 rx=2

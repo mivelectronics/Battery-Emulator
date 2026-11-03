@@ -4,13 +4,26 @@
 
 #include "../utils/logging.h"  // logging, syslog_start()
 #include "../wifi/wifi.h"      // wifi_connected()
+#ifdef ETHERNET_W5500
+#include "../ethernet/eth_w5500.h"
+#endif
 #include "mdns.h"              // init_mDNS()
 
 bool network_connected() {
+#ifdef ETHERNET_W5500
+  if (ethernet_w5500_connected()) {
+    return true;
+  }
+#endif
   return wifi_connected();
 }
 
 IPAddress network_localIP() {
+#ifdef ETHERNET_W5500
+  if (ethernet_w5500_connected()) {
+    return ETH.localIP();
+  }
+#endif
   return WiFi.localIP();
 }
 

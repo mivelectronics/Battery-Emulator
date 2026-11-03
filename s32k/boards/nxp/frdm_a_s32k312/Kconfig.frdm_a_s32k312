@@ -1,0 +1,8 @@
+# FRDM-A-S32K312 (formerly S32K312MINI-EVB).
+# S32K312 is the automotive twin of MCX E317 (same memory map and peripherals:
+# 2 MB flash, 32 KB ITCM + 64 KB DTCM + 96 KB SRAM, 6x FlexCAN FD, no EMAC),
+# so the board is built on the in-tree MCXE31x SoC support.
+# SPDX-License-Identifier: Apache-2.0
+
+config BOARD_FRDM_A_S32K312
+	select SOC_PART_NUMBER_MCXE317MPB

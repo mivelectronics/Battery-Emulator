@@ -1,0 +1,73 @@
+/*
+ * FRDM-A-S32K312 pin mux. Pins from the S32K312MINI-EVB HW user manual (rev A1, 01/2025).
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <nxp/mcx/mcxe/pinctrl/MCXE317MPB-pinctrl.h>
+
+&pinctrl {
+	/* LPUART6 -> on-board OpenSDA virtual COM (PTA15 RX, PTA16 TX) */
+	pinmux_lpuart_6: pinmux_lpuart_6 {
+		group1 {
+			pinmux = <PTA16_LPUART6_TX_O>;
+			output-enable;
+		};
+
+		group2 {
+			pinmux = <PTA15_LPUART6_RX>;
+			input-enable;
+		};
+	};
+
+	/* LPUART4 -> link to the ESP32 (PTE10 RX from ESP32 IO17, PTE11 TX to ESP32 I39) */
+	pinmux_lpuart_4: pinmux_lpuart_4 {
+		group1 {
+			pinmux = <PTE11_LPUART4_TX_O>;
+			output-enable;
+		};
+
+		group2 {
+			pinmux = <PTE10_LPUART4_RX>;
+			input-enable;
+		};
+	};
+
+	/* FlexCAN0 -> on-board TJA1043, connector J21 (inverter) */
+	pinmux_flexcan_0: pinmux_flexcan_0 {
+		group1 {
+			pinmux = <PTA6_CAN0_RX>;
+			input-enable;
+		};
+
+		group2 {
+			pinmux = <PTA7_CAN0_TX>;
+			output-enable;
+		};
+	};
+
+	/* FlexCAN1 -> header, external transceiver (battery 1) */
+	pinmux_flexcan_1: pinmux_flexcan_1 {
+		group1 {
+			pinmux = <PTB23_CAN1_RX>;
+			input-enable;
+		};
+
+		group2 {
+			pinmux = <PTB22_CAN1_TX>;
+			output-enable;
+		};
+	};
+
+	/* FlexCAN4 -> header, external transceiver (battery 2) */
+	pinmux_flexcan_4: pinmux_flexcan_4 {
+		group1 {
+			pinmux = <PTB2_CAN4_RX>;
+			input-enable;
+		};
+
+		group2 {
+			pinmux = <PTB3_CAN4_TX>;
+			output-enable;
+		};
+	};
+};

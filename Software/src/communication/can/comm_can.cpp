@@ -3,6 +3,9 @@
 #include "../../lib/mcp2518fd_lite/mcp2518fd_lite.h"
 #include "../../lib/pierremolinaro-acan-esp32/ACAN_ESP32.h"
 #include "CanReceiver.h"
+#ifdef CAN_VIA_LINK
+#include "can_link.h"
+#endif
 #include "comm_can.h"
 #include "src/datalayer/datalayer.h"
 #include "src/devboard/hal/hal.h"
@@ -72,9 +75,72 @@ static spi_host_device_t spi_host_for_bus(uint8_t arduino_bus) {
 #endif
 }
 
+#ifdef CAN_VIA_LINK
+// MIV hardware: the CAN controllers sit on an S32K behind the link UART (see can_link.h).
+static int link_iface_of(CAN_Interface interface) {
+  switch (interface) {
+    case CAN_NATIVE:
+      return 0;
+    case CANFD_NATIVE:
+    case CANFD_ADDON_MCP2518:
+      return 1;
+    case CANFD_ADDON_MCP2518_2:
+      return 2;
+    default:
+      return -1;
+  }
+}
+
+static void map_can_frame_to_variable(CAN_frame* rx_frame, CAN_Interface interface);
+
+static void on_link_frame(uint8_t iface, CAN_frame* frame) {
+  switch (iface) {
+    case 0:
+      map_can_frame_to_variable(frame, CAN_NATIVE);
+      break;
+    case 1:
+      // Same as the MCP2518 path: one controller serves both FD interface names
+      map_can_frame_to_variable(frame, CANFD_ADDON_MCP2518);
+      map_can_frame_to_variable(frame, CANFD_NATIVE);
+      break;
+    case 2:
+      map_can_frame_to_variable(frame, CANFD_ADDON_MCP2518_2);
+      break;
+    default:
+      break;
+  }
+}
+
+static bool init_can_via_link() {
+  bool any = false;
+  for (auto& r : can_receivers) {
+    int iface = link_iface_of(r.first);
+    if (iface < 0) {
+      logging.printf("CAN interface %d is not available over the S32K link\n", (int)r.first);
+      continue;
+    }
+    if (!can_link_begin()) {
+      return false;
+    }
+    const uint32_t nominal = (uint32_t)r.second.speed;
+    // FD channels run the data phase at 4x the arbitration rate, like the MCP2518 path
+    const uint32_t data = (r.first == CAN_NATIVE) ? 0 : nominal * 4;
+    can_link_configure((uint8_t)iface, nominal, data);
+    any = true;
+  }
+  if (any) {
+    logging.println("CAN over S32K link configured");
+  }
+  return true;
+}
+#endif  // CAN_VIA_LINK
+
 static bool native_can_initialized = false;
 
 bool init_CAN() {
+#ifdef CAN_VIA_LINK
+  return init_can_via_link();
+#endif
   // Native CAN (onboard the ESP32)
 
   auto nativeIt = can_receivers.find(CAN_NATIVE);
@@ -287,6 +353,16 @@ void transmit_can_frame_to_interface(const CAN_frame* tx_frame, CAN_Interface in
   }
 #endif
 
+#ifdef CAN_VIA_LINK
+  {
+    const int iface = link_iface_of(interface);
+    if (iface < 0 || !can_link_send((uint8_t)iface, *tx_frame)) {
+      datalayer.system.info.can_native_send_fail = true;
+    }
+    return;
+  }
+#endif
+
   switch (interface) {
     case CAN_NATIVE: {
       if (tx_frame->DLC > sizeof(CANMessage::data)) {
@@ -346,6 +422,10 @@ void transmit_can_frame_to_interface(const CAN_frame* tx_frame, CAN_Interface in
 
 // Receive functions
 void receive_can() {
+#ifdef CAN_VIA_LINK
+  can_link_poll(on_link_frame);
+  return;
+#endif
   if (native_can_initialized) {
     receive_frame_can_native();  // Receive CAN messages from native CAN port
   }

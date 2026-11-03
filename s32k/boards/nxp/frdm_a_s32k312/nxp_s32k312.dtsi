@@ -1,0 +1,110 @@
+/*
+ * NXP S32K312 (M7 120 MHz, 2 MB code flash, 32 KB ITCM + 64 KB DTCM + 96 KB SRAM,
+ * 6x FlexCAN FD, 8x LPUART, 4x LPSPI, no EMAC/QSPI).
+ *
+ * Same die as MCX E317, so it reuses the MCXE31x common devicetree. This is a copy of
+ * nxp_mcxe317.dtsi (Zephyr v4.5.0) with the program flash described like on MCXE31B,
+ * because nxp_mcxe317.dtsi refers to a "program_flash" label that does not exist.
+ * Usable code flash is 0x1F4000 (2000 KB): the last 48 KB belong to the HSE firmware
+ * (same split as in the PEmicro memory map for S32K312).
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <mem.h>
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
+
+/ {
+	soc {
+		itcm: memory@0 {
+			compatible = "zephyr,memory-region", "mmio-sram";
+			reg = <0x0 DT_SIZE_K(32)>;
+			zephyr,memory-region = "ITCM";
+		};
+
+		dtcm: memory@20000000 {
+			compatible = "zephyr,memory-region", "mmio-sram";
+			reg = <0x20000000 DT_SIZE_K(64)>;
+			zephyr,memory-region = "DTCM";
+		};
+
+		/* Standby RAM (content retained in standby) */
+		stdby_ram: memory@20400000 {
+			compatible = "mmio-sram";
+			reg = <0x20400000 DT_SIZE_K(32)>;
+		};
+
+		/* Run-mode SRAM */
+		sram: memory@20408000 {
+			compatible = "mmio-sram";
+			reg = <0x20408000 DT_SIZE_K(64)>;
+		};
+
+		peripheral: peripheral@40000000 {
+			ranges = <0x0 0x40000000 0x10000000>;
+		};
+	};
+};
+
+#include <nxp/mcx/mcxe/nxp_mcxe31x_common.dtsi>
+
+&c40fc {
+	status = "okay";
+	ranges = <0x0 0x00400000 DT_SIZE_K(2000)>;
+
+	flash0: flash@0 {
+		compatible = "nxp,c40-flash", "soc-nv-flash";
+		reg = <0x0 DT_SIZE_K(2000)>;
+		erase-block-size = <DT_SIZE_K(8)>;
+		write-block-size = <8>;
+		ranges;
+		#address-cells = <1>;
+		#size-cells = <1>;
+	};
+};
+
+&flexcan_0 {
+	number-of-mb = <64>;
+};
+
+&flexcan_1 {
+	number-of-mb = <64>;
+};
+
+&flexcan_2 {
+	number-of-mb = <64>;
+};
+
+&flexcan_3 {
+	number-of-mb = <32>;
+};
+
+&flexcan_4 {
+	number-of-mb = <32>;
+};
+
+&flexcan_5 {
+	number-of-mb = <32>;
+};
+
+&peripheral {
+	/delete-node/ emac@480000;
+	/delete-node/ sai@36c000;
+	/delete-node/ sai@4dc000;
+	/delete-node/ lpuart@48c000;
+	/delete-node/ lpuart@490000;
+	/delete-node/ lpuart@494000;
+	/delete-node/ lpuart@498000;
+	/delete-node/ lpuart@49c000;
+	/delete-node/ lpuart@4a0000;
+	/delete-node/ lpuart@4a4000;
+	/delete-node/ lpuart@4a8000;
+	/delete-node/ lpspi@4bc000;
+	/delete-node/ lpspi@4c0000;
+	/delete-node/ qspi@4cc000;
+	/delete-node/ adc@a8000;
+	/delete-node/ lpcmp@4e8000;
+	/delete-node/ pit@2fc000;
+	/delete-node/ stm@474000;
+	/delete-node/ emios@90000;
+};

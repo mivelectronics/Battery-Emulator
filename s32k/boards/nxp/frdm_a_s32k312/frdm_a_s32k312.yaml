@@ -1,0 +1,13 @@
+identifier: frdm_a_s32k312
+name: NXP FRDM-A-S32K312
+type: mcu
+arch: arm
+ram: 64
+flash: 2048
+toolchain:
+  - zephyr
+supported:
+  - can
+  - gpio
+  - uart
+vendor: nxp

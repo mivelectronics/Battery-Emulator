@@ -1,0 +1,155 @@
+
+P&E GDB Server for Arm(R) devices, Version 9.32.00.00
+Copyright 2018, P&E Microcomputer Systems Inc, All rights reserved
+
+Loading library C:\PEMicro\gdbserver\gdi\unit_ngs_arm_internal.dll ... Done.
+
+Command line arguments: -startserver -device=NXP_S32K3xx_S32K312 -interface=USBMULTILINK -port=PEM39E007 -serverport=7224 -singlesession 
+Device selected is NXP_S32K3xx_S32K312
+User Specified Hardware Selection : Interface=USBMULTILINK and Port=PEM39E007
+Connecting to target.
+PEmicro Interface detected - Flash Version 10.98 
+ 
+Starting reset script (C:\PEMicro\gdbserver\gdi\P&E\supportFiles_ARM\NXP\S32K3xx\S32K312.mac) ...  
+REM Enable clocks for selected cores in MC_ME module (the sequence below enables all clocks).                                                                                                            
+REM Initialize RAM and DMA:                                                                                                                                                                              
+REM Initialize DMA TCD:                                                                                                                                                                                  
+REM Copy valid executable code to RAM for each core to be used.                                                                                                                                          
+REM Enable required cores in MC_ME:                                                                                                                                                                      
+Delaying for 20mS ... 
+Done. 
+ 
+Reset script (C:\PEMicro\gdbserver\gdi\P&E\supportFiles_ARM\NXP\S32K3xx\S32K312.mac) completed. 
+ 
+Device is NXP_S32K3xx_S32K312. 
+Mode is In-Circuit Debug. 
+
+(C)opyright 2012, P&E Microcomputer Systems, Inc. (www.pemicro.com)
+API version is 101
+
+TARGET XML PATH is C:\PEMicro\gdbserver\gdi\P&E\supportFiles_ARM\target_v7m_vfp.xml
+Server 1 running on 127.0.0.1:7224
+Server 2 running on 127.0.0.1:7226
+Server 3 running on 127.0.0.1:7228
+Server 4 running on 127.0.0.1:7230
+Server 5 running on 127.0.0.1:7232
+Server 6 running on 127.0.0.1:7234
+Server 7 running on 127.0.0.1:7236
+Server 8 running on 127.0.0.1:7238
+Server 9 running on 127.0.0.1:7240
+Server 10 running on 127.0.0.1:7242
+All Servers Running
+Connection from "127.0.0.1" via 127.0.0.1. Connection from port "59097" to 7224
+Searching for Kernel Symbols...
+rsp_qC - qSymbol: 5F74785F7468726561645F63757272656E745F707472
+  _tx_thread_current_ptr not found. ThreadX analysis not enabled.
+rsp_qC - qSymbol: 707843757272656E74544342
+  pxCurrentTCB not found. FreeRTOS analysis not enabled.
+Restarting thread awareness
+ 
+Starting reset script (C:\PEMicro\gdbserver\gdi\P&E\supportFiles_ARM\NXP\S32K3xx\S32K312.mac) ...  
+REM Enable clocks for selected cores in MC_ME module (the sequence below enables all clocks).                                                                                                            
+REM Initialize RAM and DMA:                                                                                                                                                                              
+REM Initialize DMA TCD:                                                                                                                                                                                  
+REM Copy valid executable code to RAM for each core to be used.                                                                                                                                          
+REM Enable required cores in MC_ME:                                                                                                                                                                      
+Delaying for 20mS ... 
+Done. 
+ 
+Reset script (C:\PEMicro\gdbserver\gdi\P&E\supportFiles_ARM\NXP\S32K3xx\S32K312.mac) completed. 
+ 
+CPU reset by debugger.
+ 
+Copyright 2023 P&E Microcomputer Systems,Inc.
+Command Line :C:\PEMicro\gdbserver\pegdbserver_console.exe -startserver -device=NXP_S32K3xx_S32K312 -interface=USBMULTILINK -port=PEM39E007 -serverport=7224 -singlesession 
+PEmicro Interface detected - Flash Version 10.98 
+ 
+CMD>RE
+ 
+Initializing.
+Target has been RESET and is active.
+CMD>CM C:\PEMicro\gdbserver\gdi\P&E\supportFiles_ARM\NXP\S32K3xx\nxp_s32k312_1x32x500k_hse_disabled.arp
+ 
+Initializing.
+Initialized.
+ 
+;version 1.01, 09/23/2022, Copyright 2022 P&E Microcomputer Systems, www.pemicro.com [S32K3x2_hse_disabled]
+ 
+;device nxp, s32k312, 1x32x500k,desc=hse_disabled 
+ 
+;begin_cs device=$00400000, length=$001F4000, ram=$20400000
+ 
+Loading programming algorithm ... 
+ 
+WARNING - Selected .ARP file has been modified. CRC16 = $62A0 
+Done.
+Programming sequency is : erase, blank check, program, and verify {default} 
+CMD>VC
+Command is inactive for this .ARP file. 
+VC is not implemented, falling back to VM 
+ 
+CMD>VM
+ 
+Verifying.
+Verify error at address $00400024. 
+Byte in module is $98 and should be $14. 
+Current content of flash does not match application to be programmed 
+CMD>EM
+ 
+Erasing.
+Module has been erased.
+CMD>PM
+ 
+Programming.
+ 
+Checking range of S records. 
+Checked.
+Processing Object File Data ... 
+                                
+                                
+. 
+Programmed.
+CMD>VC
+Command is inactive for this .ARP file. 
+VC is not implemented, falling back to VM 
+ 
+CMD>VM
+ 
+Verifying.
+Verified.
+ 
+ 
+CMD>RE
+ 
+Initializing.
+Target has been RESET and is active.
+ 
+Starting reset script (C:\PEMicro\gdbserver\gdi\P&E\supportFiles_ARM\NXP\S32K3xx\S32K312.mac) ...  
+REM Enable clocks for selected cores in MC_ME module (the sequence below enables all clocks).                                                                                                            
+REM Initialize RAM and DMA:                                                                                                                                                                              
+REM Initialize DMA TCD:                                                                                                                                                                                  
+REM Copy valid executable code to RAM for each core to be used.                                                                                                                                          
+REM Enable required cores in MC_ME:                                                                                                                                                                      
+Delaying for 20mS ... 
+Done. 
+ 
+Reset script (C:\PEMicro\gdbserver\gdi\P&E\supportFiles_ARM\NXP\S32K3xx\S32K312.mac) completed. 
+ 
+Restarting thread awareness
+ 
+Starting reset script (C:\PEMicro\gdbserver\gdi\P&E\supportFiles_ARM\NXP\S32K3xx\S32K312.mac) ...  
+REM Enable clocks for selected cores in MC_ME module (the sequence below enables all clocks).                                                                                                            
+REM Initialize RAM and DMA:                                                                                                                                                                              
+REM Initialize DMA TCD:                                                                                                                                                                                  
+REM Copy valid executable code to RAM for each core to be used.                                                                                                                                          
+REM Enable required cores in MC_ME:                                                                                                                                                                      
+Delaying for 20mS ... 
+Done. 
+ 
+Reset script (C:\PEMicro\gdbserver\gdi\P&E\supportFiles_ARM\NXP\S32K3xx\S32K312.mac) completed. 
+ 
+CPU reset by debugger.
+ 
+No breakpoints currently set. 
+Disconnected from "127.0.0.1" via 127.0.0.1. Disconnection by port "59097" from 7224
+Target Disconnected.

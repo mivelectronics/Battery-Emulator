@@ -1,0 +1,6 @@
+board:
+  name: frdm_a_s32k312
+  full_name: FRDM-A-S32K312
+  vendor: nxp
+  socs:
+    - name: mcxe317

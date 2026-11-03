@@ -256,7 +256,12 @@ void init_stored_settings() {
 
   datalayer.system.info.performance_measurement_active = settings.getBool("PERFPROFILE", false);
   datalayer.system.info.CAN_usb_logging_active = settings.getBool("CANLOGUSB", false);
+#ifdef HW_MIV_ESP32ETH
+  // MIV development board: log over USB unless the settings say otherwise
+  datalayer.system.info.usb_logging_active = settings.getBool("USBENABLED", true);
+#else
   datalayer.system.info.usb_logging_active = settings.getBool("USBENABLED", false);
+#endif
   datalayer.system.info.web_logging_active = settings.getBool("WEBENABLED", false);
 #ifdef SDCARD
   datalayer.system.info.CAN_SD_logging_active = settings.getBool("CANLOGSD", false);

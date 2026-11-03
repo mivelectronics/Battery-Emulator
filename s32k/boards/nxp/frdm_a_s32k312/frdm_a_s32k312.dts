@@ -1,0 +1,197 @@
+/*
+ * NXP FRDM-A-S32K312 (formerly S32K312MINI-EVB).
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include "nxp_s32k312.dtsi"
+#include "frdm_a_s32k312-pinctrl.dtsi"
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+	model = "NXP FRDM-A-S32K312";
+	compatible = "nxp,frdm-a-s32k312";
+
+	aliases {
+		led0 = &red_led;
+		led1 = &green_led;
+		led2 = &blue_led;
+		sw0 = &user_sw2;
+		sw1 = &user_sw3;
+		be-link = &lpuart_4;
+	};
+
+	chosen {
+		zephyr,sram = &sram;
+		zephyr,itcm = &itcm;
+		zephyr,dtcm = &dtcm;
+		zephyr,flash = &flash0;
+		zephyr,code-partition = &code_partition;
+		zephyr,console = &lpuart_6;
+		zephyr,shell-uart = &lpuart_6;
+		zephyr,canbus = &flexcan_0;
+	};
+
+	/* RGB LED D3, active low: PTA29 red, PTA30 green, PTA31 blue */
+	leds {
+		compatible = "gpio-leds";
+
+		red_led: led_0 {
+			gpios = <&gpioa_h 13 GPIO_ACTIVE_LOW>;
+			label = "Red LED";
+		};
+
+		green_led: led_1 {
+			gpios = <&gpioa_h 14 GPIO_ACTIVE_LOW>;
+			label = "Green LED";
+		};
+
+		blue_led: led_2 {
+			gpios = <&gpioa_h 15 GPIO_ACTIVE_LOW>;
+			label = "Blue LED";
+		};
+	};
+
+	/* SW2 PTB19, SW3 PTB26, pulled up, active low */
+	gpio_keys {
+		compatible = "gpio-keys";
+
+		user_sw2: button_0 {
+			label = "User SW2";
+			gpios = <&gpiob_h 3 GPIO_ACTIVE_LOW>;
+			zephyr,code = <INPUT_KEY_0>;
+		};
+
+		user_sw3: button_1 {
+			label = "User SW3";
+			gpios = <&gpiob_h 10 GPIO_ACTIVE_LOW>;
+			zephyr,code = <INPUT_KEY_1>;
+		};
+	};
+
+	/* TJA1043 on CAN0: EN = PTC21 (high = on), STB_N = PTC20 (low = standby), ERR_N = PTC23 */
+	can_phy0: can-phy0 {
+		compatible = "nxp,tja1043", "can-transceiver-gpio";
+		enable-gpios = <&gpioc_h 5 GPIO_ACTIVE_HIGH>;
+		standby-gpios = <&gpioc_h 4 GPIO_ACTIVE_LOW>;
+		max-bitrate = <5000000>;
+		#phy-cells = <0>;
+	};
+};
+
+&flash0 {
+	partitions {
+		ranges;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		ivt_header: partition@0 {
+			compatible = "zephyr,mapped-partition";
+			label = "ivt-header";
+			reg = <0x00000000 0x100>;
+		};
+
+		code_partition: partition@100 {
+			compatible = "zephyr,mapped-partition";
+			label = "code-partition";
+			reg = <0x00000100 (DT_SIZE_K(2000) - 0x100)>;
+		};
+	};
+};
+
+/* S32K312 is rated for 120 MHz */
+&core0 {
+	clock-frequency = <DT_FREQ_M(120)>;
+};
+
+&gpioa_h {
+	status = "okay";
+};
+
+&gpiob_h {
+	status = "okay";
+};
+
+&gpioc_h {
+	status = "okay";
+};
+
+&lpuart_6 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&pinmux_lpuart_6>;
+	pinctrl-names = "default";
+};
+
+&lpuart_4 {
+	status = "okay";
+	current-speed = <2000000>;
+	pinctrl-0 = <&pinmux_lpuart_4>;
+	pinctrl-names = "default";
+};
+
+&flexcan_0 {
+	pinctrl-0 = <&pinmux_flexcan_0>;
+	pinctrl-names = "default";
+	phys = <&can_phy0>;
+	status = "okay";
+};
+
+&flexcan_1 {
+	pinctrl-0 = <&pinmux_flexcan_1>;
+	pinctrl-names = "default";
+};
+
+&flexcan_4 {
+	pinctrl-0 = <&pinmux_flexcan_4>;
+	pinctrl-names = "default";
+};
+
+/*
+ * Clocks: FXOSC 16 MHz crystal (assumed, as on S32K312EVB-Q172) -> PLL VCO 960 MHz ->
+ * PHI0 120 MHz. CORE 120, AIPS_PLAT 60 (FlexCAN0-2), AIPS_SLOW 30, HSE 60, DCM 30.
+ */
+&firc {
+	status = "okay";
+	firc-div = "UnDiv";
+};
+
+&fxosc {
+	status = "okay";
+	freq = <16000000>;
+	workmode = "crystal";
+	delay = <49>;
+	overdrive = <12>;
+};
+
+&pll {
+	status = "okay";
+	workmode = "Integer";
+	prediv = <2>;
+	postdiv = <2>;
+	multiplier = <120>;
+	fracloopdiv = <0>;
+	stepsize = <0>;
+	stepnum = <0>;
+	accuracy = "Accuracy9";
+	outdiv = <4 4>;
+};
+
+&mc_cgm {
+	status = "okay";
+	max-ido-change = <50>;
+	step-duration = <1>;
+	clk-src-freq = <120000000>;
+	mux-0-dc-0-div = <1>;
+	mux-0-dc-1-div = <2>;
+	mux-0-dc-2-div = <4>;
+	mux-0-dc-3-div = <2>;
+	mux-0-dc-4-div = <4>;
+	mux-0-dc-5-div = <4>;
+	mux-0-dc-6-div = <1>;
+	mux-1-dc-0-div = <1>;
+	mux-2-dc-0-div = <1>;
+	mux-10-dc-0-div = <4>;
+};

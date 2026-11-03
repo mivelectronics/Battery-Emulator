@@ -27,6 +27,9 @@
 #include "../mqtt/mqtt.h"
 #include "../network/hostname.h"
 #include "../network/local_peer.h"
+#ifdef ETHERNET_W5500
+#include "../ethernet/eth_w5500.h"
+#endif
 #include "../network/network_status.h"
 #include "../sdcard/sdcard.h"
 #include "../utils/events.h"
@@ -97,9 +100,18 @@ static uint32_t ipv4_host_order(const IPAddress& ip) {
 // The peer address and Host header checks of local_peer.h. The web server listens on IPv4 only
 // (AsyncTCPSock binds AF_INET), so the peer is always IPv4.
 static bool webserver_request_is_local(AsyncWebServerRequest* request) {
-  const uint32_t own_ip = ipv4_host_order(WiFi.localIP());
-  if (!ipv4_is_local_peer(ipv4_host_order(request->client()->remoteIP()), own_ip, ipv4_host_order(WiFi.subnetMask()),
-                          ipv4_host_order(WiFi.gatewayIP()))) {
+  IPAddress own = WiFi.localIP(), mask = WiFi.subnetMask(), gateway = WiFi.gatewayIP();
+#ifdef ETHERNET_W5500
+  // A request that came in over Ethernet is judged against the Ethernet interface.
+  if (ethernet_w5500_connected() && request->client()->localIP() == ETH.localIP()) {
+    own = ETH.localIP();
+    mask = ETH.subnetMask();
+    gateway = ETH.gatewayIP();
+  }
+#endif
+  const uint32_t own_ip = ipv4_host_order(own);
+  if (!ipv4_is_local_peer(ipv4_host_order(request->client()->remoteIP()), own_ip, ipv4_host_order(mask),
+                          ipv4_host_order(gateway))) {
     return false;
   }
   return http_host_is_local(request->host().c_str(), active_hostname().c_str(), own_ip,
