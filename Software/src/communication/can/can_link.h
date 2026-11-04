@@ -25,6 +25,9 @@ bool can_link_send(uint8_t iface, const CAN_frame& frame);
 // Processes received bytes and calls on_frame for every CAN frame that arrived.
 void can_link_poll(void (*on_frame)(uint8_t iface, CAN_frame* frame));
 
+// One frame of any type. From the core task only, like everything else here.
+bool can_link_send_raw(uint8_t type, const void* payload, uint16_t len);
+
 // True while HELLO frames keep arriving from the S32K (within the last 3 s).
 bool can_link_alive();
 

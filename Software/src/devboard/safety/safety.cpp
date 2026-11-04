@@ -9,6 +9,9 @@
 #include "../../inverter/INVERTERS.h"
 #include "../utils/events.h"
 #include "../utils/ota_confirm_gate.h"
+#ifdef CAN_VIA_LINK
+#include "../../communication/link/be_snapshot.h"
+#endif
 
 static bool battery_full_event_fired = false;
 static bool battery_empty_event_fired = false;
@@ -678,6 +681,14 @@ void update_machineryprotection(uint32_t currentMillis) {
 void setBatteryPause(bool pause_battery, bool pause_CAN, EquipmentStop equipment_stop, bool store_settings) {
   DEBUG_PRINTF("Battery pause sequence %d %d %d %d\n", pause_battery, pause_CAN, equipment_stop, store_settings);
 
+#ifdef CAN_VIA_LINK
+  // The core runs on the S32K, and an equipment stop has to reach it
+  if (be_remote_active()) {
+    be_remote_cmd(BE_CMD_PAUSE, (pause_battery ? 1 : 0) | (pause_CAN ? 2 : 0), (uint32_t)equipment_stop);
+    return;
+  }
+#endif
+
   // First handle equipment stop / resume
   if (equipment_stop == STOP && !datalayer.system.info.equipment_stop_active) {
     datalayer.system.info.equipment_stop_active = true;
@@ -738,6 +749,13 @@ void graceful_restart() {
      write happen where every other runtime flash write happens instead of from
      the 1 ms tick. */
   ota_confirm_request();
+
+#ifdef CAN_VIA_LINK
+  if (be_remote_active()) {
+    be_remote_restart();
+    return;
+  }
+#endif
 
   // Stop charge/discharge so we don't damage the contactors
   setBatteryPause(true, false, EquipmentStop::UNCHANGED, false);

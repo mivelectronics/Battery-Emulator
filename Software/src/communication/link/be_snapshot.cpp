@@ -4,6 +4,13 @@
 
 #include <Arduino.h>
 #include <string.h>
+#ifdef CAN_VIA_LINK
+#include <Preferences.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
+#include <nvs.h>
+#include "../can/can_link.h"
+#endif
 
 #include "../../battery/BATTERIES.h"
 #include "../../datalayer/datalayer.h"
@@ -41,12 +48,31 @@ static constexpr uint16_t F_ALLOWED_TO_SEND_CAN = 1u << 9;
 static constexpr uint16_t F_BATTERY2_DETECTED = 1u << 10;
 static constexpr uint16_t F_BATTERY3_DETECTED = 1u << 11;
 
-// be_snap_system.supports: what the pages show. The action buttons (reset BMS, balancing, ...) stay
-// off on the ESP32 until commands can reach the S32K.
-static constexpr uint8_t S_REAL_BMS_STATUS = 1u << 0;
-static constexpr uint8_t S_CHARGED_ENERGY = 1u << 1;
-static constexpr uint8_t S_INSULATION = 1u << 2;
-static constexpr uint8_t S_MANDATORY_TAPER = 1u << 3;
+// be_snap_system.supports: what the real driver can do, so the pages offer the same buttons
+#define BE_SUPPORTS(X)                                        \
+  X(0, supports_real_BMS_status)                              \
+  X(1, supports_charged_energy)                               \
+  X(2, supports_insulation_resistance)                        \
+  X(3, mandatory_charge_taper)                                \
+  X(4, supports_clear_isolation)                              \
+  X(5, supports_reset_BMS)                                    \
+  X(6, supports_reset_SOC)                                    \
+  X(7, supports_reset_crash)                                  \
+  X(8, supports_reset_NVROL)                                  \
+  X(9, supports_reset_DTC)                                    \
+  X(10, supports_read_DTC)                                    \
+  X(11, supports_reset_BECM)                                  \
+  X(12, supports_calibrate_SOC)                               \
+  X(13, supports_contactor_close)                             \
+  X(14, supports_contactor_reset)                             \
+  X(15, supports_manual_balancing)                            \
+  X(16, supports_toggle_SOC_method)                           \
+  X(17, supports_energy_saving_mode_reset)                    \
+  X(18, supports_factory_mode_method)                         \
+  X(19, supports_balancing)                                   \
+  X(20, is_balancing_active)                                  \
+  X(21, supports_balancing_request)                           \
+  X(22, supports_isolation_test)
 
 struct be_snap_system {
   uint8_t section;
@@ -56,11 +82,13 @@ struct be_snap_system {
   uint8_t bms_reset_status;
   uint8_t can_inverter_still_alive;
   uint8_t configured_batteries;
-  uint8_t supports;
+  uint8_t reserved0;
   uint16_t flags;
   uint16_t battery_type;
   uint16_t inverter_type;
   uint16_t reserved;
+  uint32_t supports;
+  uint32_t settings_revision;
   uint32_t core_task_max_us;
   char battery_protocol[64];
   char shunt_protocol[32];
@@ -154,10 +182,11 @@ static_assert(sizeof(be_snap_battery) <= BE_LINK_MAX_PAYLOAD, "does not fit a fr
 static_assert(sizeof(be_snap_cells) <= BE_LINK_MAX_PAYLOAD, "does not fit a frame");
 static_assert(sizeof(be_snap_events) <= BE_LINK_MAX_PAYLOAD, "does not fit a frame");
 static_assert(EVENT_NOF_EVENTS <= 256, "be_snap_event.id is one byte");
+static_assert(sizeof(DATALAYER_BATTERY_SETTINGS_TYPE) <= BE_SNAPSHOT_SETTINGS_MAX, "does not fit BE_SET_LIVE");
 
 uint32_t be_snapshot_layout_hash(void) {
   // Anything that would make the two ends read each other's frames wrongly
-  uint32_t h = 2;  // bump when the meaning of a field changes
+  uint32_t h = 3;  // bump when the meaning of a field changes
   const uint32_t parts[] = {sizeof(be_snap_system),
                             sizeof(be_snap_aggregate),
                             sizeof(be_snap_settings),
@@ -257,6 +286,8 @@ static void send_cells(uint8_t pack, int (*send)(const void*, uint16_t)) {
   send(&c, offsetof(be_snap_cells, voltage_mV) + count * sizeof(uint16_t));
 }
 
+extern "C" uint32_t be_settings_revision(void);
+
 static void send_system(int (*send)(const void*, uint16_t)) {
   const auto& st = datalayer.system.status;
   const auto& info = datalayer.system.info;
@@ -271,10 +302,9 @@ static void send_system(int (*send)(const void*, uint16_t)) {
   m.can_inverter_still_alive = st.CAN_inverter_still_alive;
   m.configured_batteries = info.configured_batteries;
   if (battery) {
-    m.supports = (battery->supports_real_BMS_status() ? S_REAL_BMS_STATUS : 0) |
-                 (battery->supports_charged_energy() ? S_CHARGED_ENERGY : 0) |
-                 (battery->supports_insulation_resistance() ? S_INSULATION : 0) |
-                 (battery->mandatory_charge_taper() ? S_MANDATORY_TAPER : 0);
+#define X(bit, method) m.supports |= battery->method() ? (1ul << bit) : 0;
+    BE_SUPPORTS(X)
+#undef X
     copy_str(m.battery_interface, sizeof(m.battery_interface), battery->interface_name());
   }
   m.flags = (st.dc_bus_live ? F_DC_BUS_LIVE : 0) | (st.inverter_allows_contactor_closing ? F_INVERTER_ALLOWS : 0) |
@@ -287,6 +317,7 @@ static void send_system(int (*send)(const void*, uint16_t)) {
             (battery3_detected ? F_BATTERY3_DETECTED : 0);
   m.battery_type = (uint16_t)user_selected_battery_type;
   m.inverter_type = (uint16_t)user_selected_inverter_protocol;
+  m.settings_revision = be_settings_revision();
   m.core_task_max_us = (uint32_t)st.core_task_max_us;
   copy_str(m.battery_protocol, sizeof(m.battery_protocol), info.battery_protocol);
   copy_str(m.shunt_protocol, sizeof(m.shunt_protocol), info.shunt_protocol);
@@ -369,7 +400,7 @@ bool be_snapshot_send_step(int (*send)(const void*, uint16_t)) {
 #ifdef CAN_VIA_LINK
 
 // The drivers run on the S32K. These answer what the web pages and MQTT ask of a battery or an inverter.
-static uint8_t remote_supports;
+static uint32_t remote_supports;
 static char remote_battery_interface[8];
 static char remote_inverter_interface[8];
 static char remote_inverter_name[32];
@@ -379,10 +410,33 @@ class RemoteBattery : public Battery {
   void setup(void) override {}
   void update_values() override {}
   const char* interface_name() override { return remote_battery_interface; }
-  bool mandatory_charge_taper() override { return (remote_supports & S_MANDATORY_TAPER) != 0; }
-  bool supports_real_BMS_status() override { return (remote_supports & S_REAL_BMS_STATUS) != 0; }
-  bool supports_charged_energy() override { return (remote_supports & S_CHARGED_ENERGY) != 0; }
-  bool supports_insulation_resistance() override { return (remote_supports & S_INSULATION) != 0; }
+
+#define X(bit, method) \
+  bool method() override { return (remote_supports >> bit) & 1; }
+  BE_SUPPORTS(X)
+#undef X
+
+#define ACTION(method, code) \
+  void method() override { be_remote_cmd(BE_CMD_BATTERY_ACTION, battery_index, code); }
+  ACTION(request_isolation_test, BE_ACT_ISOLATION_TEST)
+  ACTION(clear_isolation, BE_ACT_CLEAR_ISOLATION)
+  ACTION(calibrate_SOC, BE_ACT_CALIBRATE_SOC)
+  ACTION(reset_BMS, BE_ACT_RESET_BMS)
+  ACTION(reset_SOC, BE_ACT_RESET_SOC)
+  ACTION(reset_crash, BE_ACT_RESET_CRASH)
+  ACTION(reset_contactor, BE_ACT_RESET_CONTACTOR)
+  ACTION(reset_NVROL, BE_ACT_RESET_NVROL)
+  ACTION(reset_DTC, BE_ACT_RESET_DTC)
+  ACTION(read_DTC, BE_ACT_READ_DTC)
+  ACTION(reset_BECM, BE_ACT_RESET_BECM)
+  ACTION(request_open_contactors, BE_ACT_OPEN_CONTACTORS)
+  ACTION(request_close_contactors, BE_ACT_CLOSE_CONTACTORS)
+  ACTION(toggle_SOC_method, BE_ACT_TOGGLE_SOC_METHOD)
+  ACTION(reset_energy_saving_mode, BE_ACT_RESET_ENERGY_SAVING)
+  ACTION(set_factory_mode, BE_ACT_FACTORY_MODE)
+  ACTION(initiate_balancing, BE_ACT_START_BALANCING)
+  ACTION(end_balancing, BE_ACT_END_BALANCING)
+#undef ACTION
 };
 
 class RemoteInverter : public InverterProtocol {
@@ -402,6 +456,250 @@ static uint32_t last_hello_ms = 0;
 static uint32_t last_snapshot_ms = 0;
 static bool stale = false;
 static bool layout_warned = false;
+static uint32_t seen_settings_revision = 0;
+static bool settings_revision_valid = false;
+static uint32_t restart_at_ms = 0;
+
+/* ---- Out to the S32K: one thing at a time, repeated until acknowledged ---- */
+struct OutItem {
+  uint8_t type;  // BE_LINK_CMD or BE_LINK_SETTINGS
+  uint16_t len;
+  uint8_t payload[4 + BE_SNAPSHOT_SETTINGS_MAX];
+};
+static constexpr int OUT_QUEUE_LEN = 96;
+static constexpr uint32_t OUT_RETRY_MS = 150;
+static constexpr int OUT_MAX_TRIES = 20;
+
+static QueueHandle_t out_queue = nullptr;
+static OutItem out_item;
+static bool out_busy = false;
+static uint16_t out_id = 0;
+static uint32_t out_sent_ms = 0;
+static int out_tries = 0;
+
+static bool out_enqueue(uint8_t type, const void* payload, uint16_t len) {
+  if (out_queue == nullptr || len > sizeof(OutItem::payload)) {
+    return false;
+  }
+  OutItem item;
+  item.type = type;
+  item.len = len;
+  memcpy(item.payload, payload, len);
+  if (xQueueSend(out_queue, &item, pdMS_TO_TICKS(200)) != pdTRUE) {
+    logging.println("S32K link: outgoing queue full, a command or setting was lost");
+    return false;
+  }
+  return true;
+}
+
+bool be_remote_cmd(uint16_t code, uint32_t arg0, uint32_t arg1) {
+  struct be_link_cmd c = {};
+  c.code = code;
+  c.arg0 = arg0;
+  c.arg1 = arg1;
+  return out_enqueue(BE_LINK_CMD, &c, sizeof(c));
+}
+
+// These stay on this chip, passwords above all
+static bool key_is_network(const char* key) {
+  static const char* const prefixes[] = {"SSID",       "PASSWORD",  "WIFI",   "APPASSWORD",     "HOSTNAME",
+                                         "MQTT",       "HADISC",    "HTTP",   "WEB",            "STATICIP",
+                                         "LOCALIP",    "GATEWAY",   "SUBNET", "DNS",            "SYSLOG",
+                                         "ESPNOW",     "USBENABLED", "CANLOG", "SDLOG",          "MEASURECPUTEMP",
+                                         "CPUTEMPOFFSET", "PERFPROFILE"};
+  for (const char* p : prefixes) {
+    if (strncmp(key, p, strlen(p)) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void be_remote_forward_setting(const char* key, uint8_t vtype, const void* value, uint16_t len) {
+  if (!active || key_is_network(key)) {
+    return;
+  }
+  struct be_set_kv m = {};
+  if (strlen(key) >= sizeof(m.key) || len > sizeof(m.value)) {
+    logging.printf("Setting %s is too long for the S32K link\n", key);
+    return;
+  }
+  m.hdr.kind = BE_SET_KV;
+  m.hdr.vtype = vtype;
+  strncpy(m.key, key, sizeof(m.key) - 1);
+  memcpy(m.value, value, len);
+  out_enqueue(BE_LINK_SETTINGS, &m, offsetof(be_set_kv, value) + len);
+}
+
+void be_remote_forward_remove(const char* key) {
+  if (!active || key_is_network(key) || strlen(key) >= BE_SET_KEY_LEN) {
+    return;
+  }
+  struct be_set_kv m = {};
+  m.hdr.kind = BE_SET_KV_REMOVE;
+  strncpy(m.key, key, sizeof(m.key) - 1);
+  out_enqueue(BE_LINK_SETTINGS, &m, offsetof(be_set_kv, value));
+}
+
+void be_remote_forward_clear(void) {
+  if (active) {
+    struct be_set_hdr h = {};
+    h.kind = BE_SET_CLEAR_ALL;
+    out_enqueue(BE_LINK_SETTINGS, &h, sizeof(h));
+  }
+}
+
+void be_remote_restart(void) {
+  // The S32K pauses, restarts after 5 s; this one follows when it is back up
+  be_remote_cmd(BE_CMD_RESTART, 0, 0);
+  const uint32_t now = millis() + 7000;
+  restart_at_ms = now != 0 ? now : 1;
+}
+
+void be_remote_on_ack(uint8_t type, uint8_t id, int16_t status) {
+  if (out_busy && type == out_item.type && id == (uint8_t)out_id) {
+    out_busy = false;
+    if (status != 0) {
+      logging.printf("S32K refused a command or setting: %d\n", status);
+    }
+  }
+}
+
+static void out_pump(uint32_t now_ms) {
+  if (!out_busy) {
+    if (out_queue == nullptr || xQueueReceive(out_queue, &out_item, 0) != pdTRUE) {
+      return;
+    }
+    if (++out_id == 0) {
+      out_id = 1;
+    }
+    memcpy(out_item.payload + 2, &out_id, sizeof(out_id));  // id at offset 2 in both layouts
+    out_busy = true;
+    out_tries = 0;
+    out_sent_ms = now_ms - OUT_RETRY_MS;
+  }
+  if (now_ms - out_sent_ms >= OUT_RETRY_MS) {
+    if (out_tries >= OUT_MAX_TRIES) {
+      logging.printf("S32K does not acknowledge a command or setting (type %u), dropped\n", out_item.type);
+      out_busy = false;
+      return;
+    }
+    out_tries++;
+    out_sent_ms = now_ms;
+    can_link_send_raw(out_item.type, out_item.payload, out_item.len);
+  }
+}
+
+/* ---- Live settings: anything on this chip that writes battery_settings (web, MQTT) goes up as a whole */
+static DATALAYER_BATTERY_SETTINGS_TYPE settings_shadow;
+static bool settings_shadow_valid = false;
+
+static bool send_local_settings_change() {
+  if (!settings_shadow_valid || memcmp(&settings_shadow, &datalayer.battery_settings, sizeof(settings_shadow)) == 0) {
+    return false;
+  }
+  memcpy(&settings_shadow, &datalayer.battery_settings, sizeof(settings_shadow));
+  uint8_t buf[sizeof(be_set_hdr) + sizeof(settings_shadow)];
+  be_set_hdr h = {};
+  h.kind = BE_SET_LIVE;
+  memcpy(buf, &h, sizeof(h));
+  memcpy(buf + sizeof(h), &settings_shadow, sizeof(settings_shadow));
+  out_enqueue(BE_LINK_SETTINGS, buf, sizeof(buf));
+  return true;
+}
+
+/* ---- Settings coming back from the S32K: the page shows what it runs with ---- */
+static constexpr int MAX_SYNC_KEYS = 128;
+static char sync_seen[MAX_SYNC_KEYS][BE_SET_KEY_LEN];
+static int sync_seen_count = 0;
+
+static void apply_sync_kv(const be_set_kv& m, uint16_t value_len) {
+  char key[BE_SET_KEY_LEN];
+  memcpy(key, m.key, sizeof(key));
+  key[sizeof(key) - 1] = 0;
+  if (sync_seen_count < MAX_SYNC_KEYS) {
+    memcpy(sync_seen[sync_seen_count++], key, sizeof(key));
+  }
+  // Directly, not through BatteryEmulatorSettingsStore: this must not be forwarded back
+  Preferences p;
+  if (!p.begin("batterySettings", false)) {
+    return;
+  }
+  uint32_t v = 0;
+  memcpy(&v, m.value, value_len < sizeof(v) ? value_len : sizeof(v));
+  switch (m.hdr.vtype) {
+    case 1:
+      if (!p.isKey(key) || p.getInt(key, 0) != (int32_t)v) {
+        p.putInt(key, (int32_t)v);
+      }
+      break;
+    case 2:
+      if (!p.isKey(key) || p.getUInt(key, 0) != v) {
+        p.putUInt(key, v);
+      }
+      break;
+    case 3:
+      if (!p.isKey(key) || p.getBool(key, false) != (v != 0)) {
+        p.putBool(key, v != 0);
+      }
+      break;
+    case 4: {
+      char text[BE_SET_VALUE_LEN + 1];
+      memcpy(text, m.value, value_len);
+      text[value_len] = 0;
+      if (!p.isKey(key) || p.getString(key, "") != String(text)) {
+        p.putString(key, text);
+      }
+    } break;
+    default:
+      break;
+  }
+  p.end();
+}
+
+// What the S32K does not hold falls back to the defaults it runs with, so the page must not keep it
+static void finish_sync() {
+  Preferences p;
+  if (!p.begin("batterySettings", false)) {
+    return;
+  }
+  char stale[32][BE_SET_KEY_LEN];
+  int stale_count = 0;
+  nvs_iterator_t it = nullptr;
+  esp_err_t err = nvs_entry_find("nvs", "batterySettings", NVS_TYPE_ANY, &it);
+  while (err == ESP_OK && stale_count < 32) {
+    nvs_entry_info_t info;
+    nvs_entry_info(it, &info);
+    bool keep = key_is_network(info.key);
+    for (int i = 0; !keep && i < sync_seen_count; i++) {
+      keep = strncmp(sync_seen[i], info.key, BE_SET_KEY_LEN) == 0;
+    }
+    if (!keep) {
+      strncpy(stale[stale_count], info.key, BE_SET_KEY_LEN - 1);
+      stale[stale_count++][BE_SET_KEY_LEN - 1] = 0;
+    }
+    err = nvs_entry_next(&it);
+  }
+  nvs_release_iterator(it);
+  for (int i = 0; i < stale_count; i++) {
+    p.remove(stale[i]);
+  }
+  p.end();
+  sync_seen_count = 0;
+}
+
+void be_remote_on_settings(const uint8_t* payload, uint16_t len) {
+  if (!active || len < sizeof(be_set_hdr)) {
+    return;
+  }
+  if (payload[0] == BE_SET_SYNC_KV && len >= offsetof(be_set_kv, value) && len <= sizeof(be_set_kv)) {
+    be_set_kv m = {};
+    memcpy(&m, payload, len);
+    apply_sync_kv(m, len - offsetof(be_set_kv, value));
+  } else if (payload[0] == BE_SET_SYNC_END) {
+    finish_sync();
+  }
+}
 
 // Events this module raised on behalf of the S32K, so that its own stay untouched
 static uint8_t mirrored[EVENT_NOF_EVENTS / 8 + 1];
@@ -438,6 +736,9 @@ void be_remote_on_hello(uint8_t flags, uint32_t layout_hash) {
   battery3 = nullptr;
   inverter = &remote_inverter;
   last_snapshot_ms = millis();
+  if (out_queue == nullptr) {
+    out_queue = xQueueCreate(OUT_QUEUE_LEN, sizeof(OutItem));
+  }
   active = true;
   logging.println("S32K core runs: web and MQTT now show its data, local core logic off");
 }
@@ -451,6 +752,12 @@ static void apply_system(const be_snap_system& m) {
   auto& info = datalayer.system.info;
 
   remote_supports = m.supports;
+  if (!settings_revision_valid || m.settings_revision != seen_settings_revision) {
+    settings_revision_valid = true;
+    seen_settings_revision = m.settings_revision;
+    sync_seen_count = 0;
+    be_remote_cmd(BE_CMD_SETTINGS_SYNC, 0, 0);
+  }
   copy_str(remote_battery_interface, sizeof(remote_battery_interface), m.battery_interface);
   copy_str(remote_inverter_interface, sizeof(remote_inverter_interface), m.inverter_interface);
   copy_str(remote_inverter_name, sizeof(remote_inverter_name), m.inverter_name);
@@ -613,8 +920,10 @@ void be_remote_on_snapshot(const uint8_t* p, uint16_t len) {
       }
       break;
     case SNAP_SETTINGS:
-      if (len == sizeof(be_snap_settings)) {
+      if (len == sizeof(be_snap_settings) && !send_local_settings_change()) {
         memcpy(&datalayer.battery_settings, p + offsetof(be_snap_settings, data), sizeof(datalayer.battery_settings));
+        memcpy(&settings_shadow, &datalayer.battery_settings, sizeof(settings_shadow));
+        settings_shadow_valid = true;
       }
       break;
     case SNAP_BATTERY:
@@ -654,13 +963,20 @@ void be_remote_on_snapshot(const uint8_t* p, uint16_t len) {
 void be_remote_tick(uint32_t now_ms) {
   static uint32_t next_1s = 0;
 
+  send_local_settings_change();
+  out_pump(now_ms);
+
+  if (restart_at_ms != 0 && (int32_t)(now_ms - restart_at_ms) >= 0) {
+    ESP.restart();
+  }
+
   if ((int32_t)(now_ms - next_1s) < 0) {
     return;
   }
   next_1s = now_ms + 1000;
 
   // The S32K switched to bridge mode (battery type 0): the local core logic has to start from scratch
-  if (!hello_core_active && (now_ms - last_hello_ms) < 3000) {
+  if (!hello_core_active && (now_ms - last_hello_ms) < 3000 && restart_at_ms == 0) {
     logging.println("S32K core stopped: restarting to use the local settings");
     delay(100);
     ESP.restart();

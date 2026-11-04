@@ -92,7 +92,6 @@ check("page: cells", f"Cell min/max: {b[21]} mV / {b[20]} mV" in t, f"{b[21]} / 
 check("page: temperatures", f"{s16(b[18]) / 10:.1f}" in t and f"{s16(b[19]) / 10:.1f}" in t)
 check("page: 64 kWh", "Total capacity: 64.0 kWh" in t)
 check("page: status OK", "System status: OK" in t)
-check("page: says commands do not reach the S32K", "do not reach the S32K" in t)
 
 c = get("/cellmonitor")
 want = rd(3000, 98)
@@ -116,7 +115,6 @@ check("parallel: 128 kWh in total", "Total capacity: 128.0 kWh" in t)
 save_and_reboot({5040: 0, 5041: 0, 5042: 0})
 wait_for("ESP32 restarted without the battery", lambda: "Kia/Hyundai 64" not in page_text("/"), 40)
 check("page no longer names the S32K battery", "Kia/Hyundai 64" not in page_text("/"))
-check("notice gone", "do not reach the S32K" not in page_text("/"))
 
 # Back to the simulator defaults
 wr(5000, 0xA5C3)

@@ -8,6 +8,9 @@
 #include "../../devboard/utils/events.h"
 #include "../../devboard/utils/logging.h"
 #include "../../devboard/wifi/wifi.h"
+#ifdef CAN_VIA_LINK
+#include "../link/be_snapshot.h"
+#endif
 
 /**
  * @brief Initialization of setting storage
@@ -64,6 +67,9 @@ class BatteryEmulatorSettingsStore {
   void clearAll() {
     settings.clear();
     settingsUpdated = true;
+#ifdef CAN_VIA_LINK
+    be_remote_forward_clear();
+#endif
   }
 
   int32_t getInt(const char* name, int32_t defaultValue) {
@@ -76,6 +82,9 @@ class BatteryEmulatorSettingsStore {
     if (!settings.isKey(name) || getInt(name, 0) != value) {
       settings.putInt(name, value);
       settingsUpdated = true;
+#ifdef CAN_VIA_LINK
+      be_remote_forward_setting(name, 1, &value, sizeof(value));
+#endif
     }
   }
 
@@ -89,6 +98,9 @@ class BatteryEmulatorSettingsStore {
     if (!settings.isKey(name) || getUInt(name, 0) != value) {
       settings.putUInt(name, value);
       settingsUpdated = true;
+#ifdef CAN_VIA_LINK
+      be_remote_forward_setting(name, 2, &value, sizeof(value));
+#endif
     }
   }
 
@@ -98,6 +110,9 @@ class BatteryEmulatorSettingsStore {
     if (settings.isKey(name)) {
       settings.remove(name);
       settingsUpdated = true;
+#ifdef CAN_VIA_LINK
+      be_remote_forward_remove(name);
+#endif
     }
   }
 
@@ -111,6 +126,10 @@ class BatteryEmulatorSettingsStore {
     if (!settings.isKey(name) || getBool(name, false) != value) {
       settings.putBool(name, value);
       settingsUpdated = true;
+#ifdef CAN_VIA_LINK
+      const uint32_t v = value ? 1 : 0;
+      be_remote_forward_setting(name, 3, &v, sizeof(v));
+#endif
     }
   }
 
@@ -126,6 +145,9 @@ class BatteryEmulatorSettingsStore {
     if (!settings.isKey(name) || getString(name, "") != String(value)) {
       settings.putString(name, value);
       settingsUpdated = true;
+#ifdef CAN_VIA_LINK
+      be_remote_forward_setting(name, 4, value, strlen(value));
+#endif
     }
   }
 

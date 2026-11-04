@@ -47,3 +47,7 @@ std::string mqtt_server;
 std::string mqtt_user;
 std::string mqtt_password;
 int mqtt_port = 0;
+
+uint32_t mqtt_firmware_signature(void) {
+  return 0;
+}

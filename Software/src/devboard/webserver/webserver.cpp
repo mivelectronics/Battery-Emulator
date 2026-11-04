@@ -570,6 +570,11 @@ void init_webserver() {
   // Route for clearing all events
   def_route_with_auth("/clearevents", server, HTTP_GET, [](AsyncWebServerRequest* request) {
     reset_all_events();
+#ifdef CAN_VIA_LINK
+    if (be_remote_active()) {
+      be_remote_cmd(BE_CMD_CLEAR_EVENTS, 0, 0);
+    }
+#endif
     // Send back a response that includes an instant redirect to /events
     String response = "<html><body>";
     response += "<script>window.location.href = '/events';</script>";  // Instant redirect
@@ -1765,15 +1770,6 @@ static bool render_live(CheckedHtml& content) {
 
     // Close the block
     content += "</div>";
-
-#ifdef CAN_VIA_LINK
-    if (be_remote_active()) {
-      content +=
-          "<div style='background-color: #a33; padding: 10px; margin-bottom: 10px; border-radius: 50px'>"
-          "<h4 style='color: white;'>Battery and inverter run on the S32K. This page shows their data. "
-          "Buttons and settings here do not reach the S32K yet, contactors included: use Modbus.</h4></div>";
-    }
-#endif
 
 #ifndef SMALL_FLASH_DEVICE
     const bool charger_in_use = charger != nullptr;

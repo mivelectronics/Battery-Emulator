@@ -5,6 +5,9 @@
 #include "../../devboard/safety/safety.h"
 #include "../../devboard/utils/led_handler.h"
 #include "../../inverter/INVERTERS.h"
+#ifdef CAN_VIA_LINK
+#include "../link/be_snapshot.h"
+#endif
 #ifndef UNIT_TEST
 #include "driver/gpio.h"  // gpio_hold_en / gpio_hold_dis / gpio_deep_sleep_hold_en
 #endif
@@ -615,6 +618,12 @@ void handle_BMSpower() {
 }
 
 void start_bms_reset() {
+#ifdef CAN_VIA_LINK
+  if (be_remote_active()) {
+    be_remote_cmd(BE_CMD_BMS_RESET, 0, 0);
+    return;
+  }
+#endif
   if (periodic_bms_reset || remote_bms_reset) {
     if (datalayer.system.status.bms_reset_status == BMS_RESET_IDLE) {
       // Record when we started the BMS reset process

@@ -12,6 +12,7 @@
 #include <zephyr/kernel.h>
 
 #include "be_cfg.h"
+#include "be_kv.h"
 #include "can_io.h"
 #include "sim_kona_uds.inc"
 
@@ -33,6 +34,7 @@ struct sim_uds_state {
 };
 static struct sim_uds_state uds[BE_NUM_CAN];
 static int64_t next_100ms, next_1s;
+static uint32_t other_uds_requests;
 static uint8_t inverter_421x[8];
 static uint32_t inverter_421x_count;
 
@@ -135,6 +137,8 @@ bool sim_battery_on_frame(const struct be_can_rx *f)
 		}
 	} else if ((f->data[0] & 0xF0) == 0x30 && u->pending != NULL && u->next == 0xFF) {
 		u->next = 1;
+	} else if (f->data[0] < 8) {
+		other_uds_requests++;
 	}
 	return false;
 }
@@ -148,6 +152,22 @@ int sim_battery_reg_read(uint16_t addr, uint16_t *v)
 		*v = inverter_421x[addr - 401];
 	} else if (addr == 409) {
 		*v = (uint16_t)inverter_421x_count;
+	} else if (addr == 410) {
+		*v = (uint16_t)other_uds_requests;
+	} else if (addr == 411) {
+		/* Settings the S32K must never receive from the ESP32 */
+		static const char *const network[] = {"SSID", "PASSWORD", "WIFI", "APPASSWORD", "HOSTNAME",
+						      "MQTT", "HTTP", "LOCALIP", "SYSLOG"};
+		uint16_t n = 0;
+
+		for (int i = 0; i < be_kv_count(); i++) {
+			for (size_t k = 0; k < ARRAY_SIZE(network); k++) {
+				if (strncmp(be_kv_at(i)->key, network[k], strlen(network[k])) == 0) {
+					n++;
+				}
+			}
+		}
+		*v = n;
 	} else {
 		*v = 0;
 	}

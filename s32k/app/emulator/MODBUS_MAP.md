@@ -92,6 +92,7 @@ An invalid configuration is refused by command 1 with result -22 (EINVAL) and no
 | 222 | longest core tick since start, µs (the tick runs every 1 ms) |
 | 223 | received CAN frames dropped (queue full) |
 | 224 | free stack of the core thread, bytes |
+| 225 | number of upstream settings stored by name, those saved from the ESP32 web page |
 
 210–220 are the combined view of all packs, what the inverter driver reads.
 
@@ -140,6 +141,8 @@ An invalid configuration is refused by command 1 with result -22 (EINVAL) and no
 | 400 | simulator present: 1 |
 | 401–408 | bytes of the last 0x4210 frame the inverter driver sent |
 | 409 | count of those frames |
+| 410 | UDS requests to the battery other than the regular polls |
+| 411 | stored settings with a network name (must stay 0: they stay on the ESP32) |
 
 ## Home Assistant example
 

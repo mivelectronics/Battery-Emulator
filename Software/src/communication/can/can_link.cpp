@@ -28,6 +28,10 @@ static bool link_send(uint8_t type, const void* payload, uint16_t len) {
   return Serial1.write(enc, n) == n;
 }
 
+bool can_link_send_raw(uint8_t type, const void* payload, uint16_t len) {
+  return started && link_send(type, payload, len);
+}
+
 bool can_link_begin() {
   if (started) {
     return true;
@@ -198,6 +202,16 @@ void can_link_poll(void (*on_frame)(uint8_t iface, CAN_frame* frame)) {
         } break;
         case BE_LINK_SNAPSHOT:
           be_remote_on_snapshot(f.payload, f.len);
+          break;
+        case BE_LINK_SETTINGS:
+          be_remote_on_settings(f.payload, f.len);
+          break;
+        case BE_LINK_ACK:
+          if (f.len >= sizeof(struct be_link_ack)) {
+            struct be_link_ack a;
+            memcpy(&a, f.payload, sizeof(a));
+            be_remote_on_ack(a.acked_type, a.acked_seq, a.status);
+          }
           break;
         case BE_LINK_LOG: {
           char text[161];

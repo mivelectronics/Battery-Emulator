@@ -30,6 +30,7 @@ struct be_can_rx {
 void be_core_setup(void);
 void be_core_tick(void);
 void be_core_print_status(void);
+void be_core_request_reload(void); /* the stored settings changed: read them again in the core thread */
 int be_core_reg_read(uint16_t addr, uint16_t *value);
 
 /* be_core_run.c */

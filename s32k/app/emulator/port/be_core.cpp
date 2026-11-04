@@ -13,6 +13,7 @@
 
 #include "src/battery/BATTERIES.h"
 #include "src/communication/link/be_snapshot.h"
+#include "src/communication/contactorcontrol/comm_contactorcontrol.h"
 #include "src/charger/CHARGERS.h"
 #include "src/communication/Transmitter.h"
 #include "src/communication/can/comm_can.h"
@@ -32,6 +33,7 @@
 #include "src/inverter/INVERTERS.h"
 
 #include "be_core.h"
+#include "be_link_cmd.h"
 
 extern "C" {
 #include "be_cfg.h"
@@ -93,6 +95,11 @@ static void apply_be_cfg() {
   datalayer.battery_settings.soc_scaling_active = be_cfg.soc_scaling != 0;
 }
 
+static volatile bool reload_requested = false;
+void be_core_request_reload(void) {
+  reload_requested = true;
+}
+
 void be_core_setup(void) {
   init_hal();
   init_events();
@@ -121,9 +128,123 @@ void be_core_setup(void) {
   init_CAN();
 }
 
+static void battery_action(Battery* b, uint32_t action) {
+  if (b == nullptr) {
+    return;
+  }
+  switch (action) {
+    case BE_ACT_ISOLATION_TEST:
+      b->request_isolation_test();
+      break;
+    case BE_ACT_CLEAR_ISOLATION:
+      b->clear_isolation();
+      break;
+    case BE_ACT_CALIBRATE_SOC:
+      b->calibrate_SOC();
+      break;
+    case BE_ACT_RESET_BMS:
+      b->reset_BMS();
+      break;
+    case BE_ACT_RESET_SOC:
+      b->reset_SOC();
+      break;
+    case BE_ACT_RESET_CRASH:
+      b->reset_crash();
+      break;
+    case BE_ACT_RESET_CONTACTOR:
+      b->reset_contactor();
+      break;
+    case BE_ACT_RESET_NVROL:
+      b->reset_NVROL();
+      break;
+    case BE_ACT_RESET_DTC:
+      b->reset_DTC();
+      break;
+    case BE_ACT_READ_DTC:
+      b->read_DTC();
+      break;
+    case BE_ACT_RESET_BECM:
+      b->reset_BECM();
+      break;
+    case BE_ACT_OPEN_CONTACTORS:
+      b->request_open_contactors();
+      break;
+    case BE_ACT_CLOSE_CONTACTORS:
+      b->request_close_contactors();
+      break;
+    case BE_ACT_TOGGLE_SOC_METHOD:
+      b->toggle_SOC_method();
+      break;
+    case BE_ACT_RESET_ENERGY_SAVING:
+      b->reset_energy_saving_mode();
+      break;
+    case BE_ACT_FACTORY_MODE:
+      b->set_factory_mode();
+      break;
+    case BE_ACT_START_BALANCING:
+      b->initiate_balancing();
+      break;
+    case BE_ACT_END_BALANCING:
+      b->end_balancing();
+      break;
+    default:
+      break;
+  }
+}
+
+static void handle_commands() {
+  struct be_link_cmd c;
+
+  while (be_link_cmd_pop_core(&c)) {
+    switch (c.code) {
+      case BE_CMD_BATTERY_ACTION:
+        battery_action(c.arg0 == 3 ? battery3 : (c.arg0 == 2 ? battery2 : battery), c.arg1);
+        break;
+      case BE_CMD_PAUSE:
+        setBatteryPause((c.arg0 & 1) != 0, (c.arg0 & 2) != 0, static_cast<EquipmentStop>(c.arg1));
+        break;
+      case BE_CMD_RESTART:
+        // Stop charge/discharge first, like graceful_restart() on the ESP32
+        setBatteryPause(true, false, EquipmentStop::UNCHANGED, false);
+        be_cfg_system_reset_in(5000);
+        break;
+      case BE_CMD_BMS_RESET:
+        start_bms_reset();
+        break;
+      case BE_CMD_CLEAR_EVENTS:
+        reset_all_events();
+        break;
+      default:
+        break;
+    }
+  }
+
+  // Live settings from the web page or MQTT. The clocks of the two chips differ: what they time here
+  // stays timed here.
+  static uint8_t blob[sizeof(DATALAYER_BATTERY_SETTINGS_TYPE)];
+  if (be_link_cmd_pop_live(blob, sizeof(blob)) == sizeof(blob)) {
+    DATALAYER_BATTERY_SETTINGS_TYPE n;
+    auto& cur = datalayer.battery_settings;
+
+    memcpy(&n, blob, sizeof(n));
+    n.balancing_start_time_ms = cur.balancing_start_time_ms;
+    n.recovery_charge_start_time_ms = cur.recovery_charge_start_time_ms;
+    n.remote_set_timestamp = (n.remote_set_timestamp != cur.remote_set_timestamp) ? millis() : cur.remote_set_timestamp;
+    cur = n;
+  }
+
+  if (reload_requested) {
+    reload_requested = false;
+    init_stored_settings();
+    apply_be_cfg();
+  }
+}
+
 void be_core_tick(void) {
   static int loopPhase = 0;
   static bool snapshot_sending = false;
+
+  handle_commands();
 
   receive_can();
   receive_rs485();
@@ -268,6 +389,8 @@ static uint16_t reg_system(uint16_t r) {
       return be_core_rx_drops > 0xFFFF ? 0xFFFF : be_core_rx_drops;
     case 24:
       return be_core_stack_free();
+    case 25:
+      return static_cast<uint16_t>(be_kv_count());
     default:
       return 0;
   }

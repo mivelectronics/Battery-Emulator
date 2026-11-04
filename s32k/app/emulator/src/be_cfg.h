@@ -72,5 +72,6 @@ int be_cfg_validate(const struct be_cfg *cfg);
 /* Restarts the chip. On S32K3 / MCX E31x the Arm SYSRESETREQ used by sys_reboot() leaves the part
  * hung (seen on FRDM-A-S32K312); a functional reset through MC_ME works. Does not return. */
 void be_cfg_system_reset(void);
+void be_cfg_system_reset_in(uint32_t ms);
 
 #endif /* BE_CFG_H */

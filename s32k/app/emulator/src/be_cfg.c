@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "be_cfg.h"
+#include "be_kv.h"
 
 #include <errno.h>
 #include <string.h>
@@ -86,6 +87,9 @@ int be_cfg_validate(const struct be_cfg *cfg)
 
 static int be_settings_set(const char *name, size_t len, settings_read_cb read_cb, void *cb_arg)
 {
+	if (strncmp(name, "k/", 2) == 0) {
+		return be_kv_on_load(name + 2, len, (int (*)(void *, void *, size_t))read_cb, cb_arg);
+	}
 	if (strcmp(name, "cfg") != 0) {
 		return -ENOENT;
 	}
@@ -145,10 +149,23 @@ void be_cfg_system_reset(void)
 	 * flash load left the chip dead before the first line of the boot, with the escalation
 	 * thresholds at 0 and the flash intact. 29 functional resets in a row were fine. Cause not known.
 	 */
+	(void)irq_lock();
 	POWER_RequestResetMode(kMC_ME_FunctionalReset);
 	while (1) {
 		k_cpu_idle();
 	}
+}
+
+static void reset_work_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	be_cfg_system_reset();
+}
+static K_WORK_DELAYABLE_DEFINE(reset_work, reset_work_handler);
+
+void be_cfg_system_reset_in(uint32_t ms)
+{
+	k_work_schedule(&reset_work, K_MSEC(ms));
 }
 
 int be_cfg_save(const struct be_cfg *cfg)

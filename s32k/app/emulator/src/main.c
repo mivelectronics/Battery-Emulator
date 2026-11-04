@@ -16,6 +16,7 @@
 
 #include "be_cfg.h"
 #include "be_core.h"
+#include "be_link_cmd.h"
 #include "can_io.h"
 #include "link.h"
 #include "modbus_srv.h"
@@ -24,6 +25,9 @@ static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
 
 static void on_link_frame(const struct be_link_frame *f)
 {
+	if (be_link_cmd_frame(f)) {
+		return;
+	}
 	/* CMD from the ESP32 (bridge mode): set the bit rate of a channel, stored in NVS */
 	if (f->type == BE_LINK_CMD) {
 		struct be_link_cmd c = {0};
@@ -101,6 +105,7 @@ int main(void)
 
 	while (1) {
 		link_poll(K_MSEC(50));
+		be_link_cmd_poll();
 
 		int64_t now = k_uptime_get();
 

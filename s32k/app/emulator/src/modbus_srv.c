@@ -38,13 +38,6 @@ enum mb_cmd {
 	CMD_REBOOT = 0xB007,
 };
 
-static void reboot_handler(struct k_work *work)
-{
-	ARG_UNUSED(work);
-	be_cfg_system_reset();
-}
-static K_WORK_DELAYABLE_DEFINE(reboot_work, reboot_handler);
-
 static struct be_cfg stage;     /* settings being edited */
 static int64_t unlocked_until;  /* uptime ms */
 static int16_t last_cmd_result; /* 0 ok, negative errno */
@@ -80,7 +73,7 @@ static int read_sys(uint16_t r, uint16_t *v)
 	case 6: *v = link_peer_alive() ? 1 : 0; break;
 	case 7: *v = unlocked() ? 1 : 0; break;
 	case 8: *v = (uint16_t)last_cmd_result; break;
-	case 9: *v = (memcmp(&stage, &be_cfg, sizeof(stage)) != 0) ? 1 : 0; break; /* unsaved edits */
+	case 9: *v = (unlocked() && memcmp(&stage, &be_cfg, sizeof(stage)) != 0) ? 1 : 0; break; /* unsaved edits */
 	default: *v = 0; break; /* reserved: read as 0 */
 	}
 	return 0;
@@ -161,7 +154,7 @@ static int read_cfg(uint16_t off, uint16_t *v)
 		*v = (uint16_t)last_cmd_result;
 		return 0;
 	}
-	uint16_t *p = cfg_reg16(&stage, off, &is_u8);
+	uint16_t *p = cfg_reg16(unlocked() ? &stage : &be_cfg, off, &is_u8);
 
 	*v = p ? *p : 0;
 	return 0;
@@ -223,7 +216,7 @@ static int do_command(uint16_t cmd)
 		break;
 	case CMD_REBOOT:
 		/* Later, so that this write's response still goes out */
-		k_work_schedule(&reboot_work, K_MSEC(200));
+		be_cfg_system_reset_in(200);
 		break;
 	default:
 		err = -EINVAL;
@@ -238,6 +231,9 @@ static int holding_reg_wr(uint16_t addr, uint16_t reg)
 {
 	if (addr == REG_CFG_BASE) {
 		if (reg == UNLOCK_KEY) {
+			if (!unlocked()) {
+				stage = be_cfg; /* the web page may have changed the settings since */
+			}
 			unlocked_until = k_uptime_get() + UNLOCK_MS;
 		} else {
 			unlocked_until = 0;
