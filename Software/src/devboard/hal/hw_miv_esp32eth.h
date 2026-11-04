@@ -13,7 +13,7 @@ interfaces are served by the S32K over the link UART (bridge mode, can_link.h).
 - RS485: ST3485, RO -> IO4, DI <- IO16, DE+/RE on GPIO2 (strapping pin, low at boot).
 - LED: WS2812 on GPIO0 (strapping pin; the LED's data line is a load only).
 - Button B1 on IO15.
-- Link to the S32K: UART2, TX IO17 (J11 pin 4), RX I39 (J11 pin 7), see FIRMWARE_PLAN.md.
+- Link to the S32K: UART1 (UART2 is the RS485), TX IO17 (J11 pin 4), RX I39 (J11 pin 7), see FIRMWARE_PLAN.md.
 */
 
 class MivEsp32EthHal : public Esp32Hal {

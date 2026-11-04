@@ -15,6 +15,16 @@ static const struct device *const cans[BE_NUM_CAN] = {
 
 struct can_io_stats can_io_stats[BE_NUM_CAN];
 static can_io_rx_fn rx_hook;
+static bool loopback[BE_NUM_CAN]; /* diagnostic, not stored */
+
+int can_io_set_loopback(uint8_t iface, bool on)
+{
+	if (iface >= BE_NUM_CAN) {
+		return -EINVAL;
+	}
+	loopback[iface] = on;
+	return can_io_apply(iface);
+}
 
 static void rx_cb(const struct device *dev, struct can_frame *frame, void *user_data)
 {
@@ -66,7 +76,7 @@ int can_io_apply(uint8_t iface)
 	if (err) {
 		return err;
 	}
-	can_mode_t mode = CAN_MODE_NORMAL;
+	can_mode_t mode = loopback[iface] ? CAN_MODE_LOOPBACK : CAN_MODE_NORMAL;
 
 	if (c->data_kbps) {
 		err = can_calc_timing_data(dev, &td, c->data_kbps * 1000U, 750);

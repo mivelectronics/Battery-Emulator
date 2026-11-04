@@ -11,6 +11,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/printk.h>
+#include <soc.h>
 #include <string.h>
 
 #include "be_cfg.h"
@@ -48,6 +49,11 @@ static void on_link_frame(const struct be_link_frame *f)
 						.status = (int16_t)err};
 
 			link_send(BE_LINK_ACK, &a, sizeof(a));
+		} else if (c.code == 2) {
+			/* Diagnostic: internal loopback, arg0 = iface, arg1 = on/off */
+			int err = can_io_set_loopback((uint8_t)c.arg0, c.arg1 != 0);
+
+			printk("CAN%u loopback %u: %d\n", (unsigned int)c.arg0, (unsigned int)c.arg1, err);
 		}
 	}
 }
@@ -55,6 +61,11 @@ static void on_link_frame(const struct be_link_frame *f)
 int main(void)
 {
 	printk("\n=== BE S32K emulator (A+) on %s ===\n", CONFIG_BOARD_TARGET);
+	printk("reset flags: destructive 0x%08x functional 0x%08x\n", MC_RGM->DES, MC_RGM->FES);
+	/* The flags are write-1-to-clear and accumulate; clear them so the next start reports only
+	 * its own cause */
+	MC_RGM->DES = MC_RGM->DES;
+	MC_RGM->FES = MC_RGM->FES;
 
 	if (gpio_is_ready_dt(&led)) {
 		gpio_pin_configure_dt(&led, GPIO_OUTPUT_INACTIVE);
@@ -83,10 +94,12 @@ int main(void)
 			next_stats += 10000;
 			const struct be_link_stats *ls = link_rx_stats();
 
-			printk("cfg rev %u | link tx %u rx %u B ok %u peer %d | can rx %u/%u/%u "
-			       "tx %u/%u/%u err %u/%u/%u\n",
+			printk("cfg rev %u | link tx %u rx %u B ok %u crc %u frm %u ovf %u | uart or %u fe %u nf %u "
+			       "drop %u | peer %d | can rx %u/%u/%u tx %u/%u/%u err %u/%u/%u\n",
 			       be_cfg.revision, link_stats.tx_frames, link_stats.rx_bytes,
-			       ls->frames_ok, link_peer_alive(), can_io_stats[0].rx,
+			       ls->frames_ok, ls->crc_errors, ls->framing_errors, ls->overflows,
+			       link_stats.uart_overrun, link_stats.uart_framing, link_stats.uart_noise,
+			       link_stats.rx_drops, link_peer_alive(), can_io_stats[0].rx,
 			       can_io_stats[1].rx, can_io_stats[2].rx, can_io_stats[0].tx_ok,
 			       can_io_stats[1].tx_ok, can_io_stats[2].tx_ok, can_io_stats[0].tx_err,
 			       can_io_stats[1].tx_err, can_io_stats[2].tx_err);

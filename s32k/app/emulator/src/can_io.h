@@ -28,6 +28,9 @@ int can_io_init(can_io_rx_fn rx);
 /* Applies be_cfg.can[iface] (restarts that channel). */
 int can_io_apply(uint8_t iface);
 
+/* Diagnostic: internal loopback on a channel (not stored, restarts the channel). */
+int can_io_set_loopback(uint8_t iface, bool on);
+
 /* Non-blocking transmit. */
 int can_io_send(uint8_t iface, const struct can_frame *frame);
 

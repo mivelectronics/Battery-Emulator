@@ -13,6 +13,7 @@
 
 struct link_stats {
 	uint32_t tx_frames, tx_drops, rx_bytes, rx_drops, can_q_drops;
+	uint32_t uart_overrun, uart_framing, uart_noise;
 };
 extern struct link_stats link_stats;
 

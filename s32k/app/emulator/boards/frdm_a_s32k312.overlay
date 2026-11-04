@@ -26,3 +26,13 @@
 		status = "okay";
 	};
 };
+
+/* Link UART to the ESP32 on DMA. Requests 42/43 are LPUART4 TX/RX on DMAMUX1 (channels 6-11). */
+&edma {
+	status = "okay";
+};
+
+&lpuart_4 {
+	dmas = <&edma 8 42>, <&edma 9 43>;
+	dma-names = "tx", "rx";
+};

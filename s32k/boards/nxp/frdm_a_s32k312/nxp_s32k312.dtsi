@@ -63,6 +63,17 @@
 	};
 };
 
+/*
+ * This part has 12 eDMA channels. The common dtsi says 32, and the driver computes channels per mux
+ * as dma-channels / number of muxes. Measured on FRDM-A-S32K312: eDMA channel 8 answers only to
+ * DMAMUX1 slot 2 and channel 9 only to slot 3, which fits an even split of 6 channels per mux
+ * (DMAMUX1 slots 0-5 = channels 6-11). MCXE317_features.h says 8 per mux; with that the request goes
+ * to a slot with no channel behind it, and the transfer never starts, with no error flag.
+ */
+&edma {
+	dma-channels = <12>;
+};
+
 &flexcan_0 {
 	number-of-mb = <64>;
 };

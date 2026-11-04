@@ -29,6 +29,8 @@
 		group2 {
 			pinmux = <PTE10_LPUART4_RX>;
 			input-enable;
+			/* The network module is optional: a floating RX means endless framing errors */
+			bias-pull-up;
 		};
 	};
 

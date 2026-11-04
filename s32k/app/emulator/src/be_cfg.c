@@ -8,6 +8,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/sys/printk.h>
+#include <fsl_power.h>
 
 struct be_cfg be_cfg;
 
@@ -106,6 +107,14 @@ int be_cfg_init(void)
 	err = be_cfg_reload(&be_cfg);
 	printk("config: %s, revision %u\n", err ? "defaults" : "loaded from NVS", be_cfg.revision);
 	return 0;
+}
+
+void be_cfg_system_reset(void)
+{
+	POWER_RequestResetMode(kMC_ME_DestructiveReset);
+	while (1) {
+		k_cpu_idle();
+	}
 }
 
 int be_cfg_save(const struct be_cfg *cfg)

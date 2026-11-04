@@ -69,10 +69,94 @@ bool can_link_send(uint8_t iface, const CAN_frame& frame) {
   return link_send(BE_LINK_CAN, &m, be_link_can_wire_size(m.len));
 }
 
+#ifdef LINK_SELFTEST
+#ifndef LINK_SELFTEST_PERIOD_MS
+#define LINK_SELFTEST_PERIOD_MS 100
+#endif
+// Development test of the whole path without a CAN peer: the S32K is asked to put its channels in
+// internal loopback, frames sent from here come back as received frames and are checked.
+static uint32_t st_sent, st_echoed, st_bad;
+static uint32_t st_seq;
+static unsigned long st_next_ms, st_next_report_ms;
+static bool st_armed;
+
+static void selftest_tx() {
+  const unsigned long now = millis();
+  if (!can_link_alive() || (long)(now - st_next_ms) < 0) {
+    return;
+  }
+  st_next_ms = now + LINK_SELFTEST_PERIOD_MS;
+  if (!st_armed) {
+    for (uint8_t i = 0; i < 3; i++) {
+      struct be_link_cmd c = {};
+      c.code = 2;  // loopback on
+      c.arg0 = i;
+      c.arg1 = 1;
+      link_send(BE_LINK_CMD, &c, sizeof(c));
+    }
+    st_armed = true;
+    st_next_ms = now + 500;
+    return;
+  }
+  for (uint8_t i = 0; i < 3; i++) {
+    CAN_frame f = {};
+    f.FD = i != 0;
+    f.DLC = i == 0 ? 8 : 64;
+    f.ID = 0x100 + i;
+    for (int k = 0; k < f.DLC; k++) {
+      f.data.u8[k] = (uint8_t)(st_seq + k * 3);
+    }
+    if (can_link_send(i, f)) {
+      st_sent++;
+    }
+  }
+  st_seq++;
+}
+
+static void selftest_rx(const CAN_frame& f, uint8_t iface) {
+  bool ok = f.ID == 0x100u + iface && f.DLC == (iface == 0 ? 8 : 64) && f.FD == (iface != 0);
+  // The first byte carries the low 8 bits of the sequence, the rest must follow it
+  for (int k = 1; ok && k < f.DLC; k++) {
+    ok = f.data.u8[k] == (uint8_t)(f.data.u8[0] + k * 3);
+  }
+  if (ok) {
+    st_echoed++;
+  } else {
+    st_bad++;
+  }
+}
+
+static void selftest_report() {
+  const unsigned long now = millis();
+  if ((long)(now - st_next_report_ms) < 0) {
+    return;
+  }
+  st_next_report_ms = now + 5000;
+  logging.printf("LINK SELFTEST: peer %d sent %lu echoed %lu bad %lu | rx ok %lu crc %lu framing %lu overflow %lu\n",
+                 can_link_alive(), (unsigned long)st_sent, (unsigned long)st_echoed, (unsigned long)st_bad,
+                 (unsigned long)rx.stats.frames_ok, (unsigned long)rx.stats.crc_errors,
+                 (unsigned long)rx.stats.framing_errors, (unsigned long)rx.stats.overflows);
+}
+#endif  // LINK_SELFTEST
+
 void can_link_poll(void (*on_frame)(uint8_t iface, CAN_frame* frame)) {
   if (!started) {
     return;
   }
+  // The S32K watches these to know a network module is present
+  static unsigned long next_hello_ms = 0;
+  if ((long)(millis() - next_hello_ms) >= 0) {
+    next_hello_ms = millis() + 1000;
+    struct be_link_hello h = {};
+    h.proto_version = BE_LINK_PROTO_VERSION;
+    h.role = BE_LINK_ROLE_NET;
+    strncpy(h.fw_version, "esp32-be", sizeof(h.fw_version) - 1);
+    link_send(BE_LINK_HELLO, &h, sizeof(h));
+  }
+#ifdef LINK_SELFTEST
+  selftest_tx();
+  selftest_report();
+#endif
   uint8_t buf[256];
   int avail;
   while ((avail = Serial1.available()) > 0) {
@@ -95,6 +179,9 @@ void can_link_poll(void (*on_frame)(uint8_t iface, CAN_frame* frame)) {
           cf.DLC = m.len > 64 ? 64 : m.len;
           cf.ID = m.id;
           memcpy(cf.data.u8, m.data, cf.DLC);
+#ifdef LINK_SELFTEST
+          selftest_rx(cf, m.iface);
+#endif
           on_frame(m.iface, &cf);
         } break;
         case BE_LINK_HELLO: {

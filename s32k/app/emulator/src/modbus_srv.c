@@ -14,7 +14,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/modbus/modbus.h>
 #include <zephyr/sys/printk.h>
-#include <zephyr/sys/reboot.h>
 
 #include "be_cfg.h"
 #include "can_io.h"
@@ -36,6 +35,13 @@ enum mb_cmd {
 	CMD_DEFAULTS = 3,
 	CMD_REBOOT = 0xB007,
 };
+
+static void reboot_handler(struct k_work *work)
+{
+	ARG_UNUSED(work);
+	be_cfg_system_reset();
+}
+static K_WORK_DELAYABLE_DEFINE(reboot_work, reboot_handler);
 
 static struct be_cfg stage;     /* settings being edited */
 static int64_t unlocked_until;  /* uptime ms */
@@ -193,7 +199,8 @@ static int do_command(uint16_t cmd)
 		stage.revision = be_cfg.revision;
 		break;
 	case CMD_REBOOT:
-		sys_reboot(SYS_REBOOT_COLD);
+		/* Later, so that this write's response still goes out */
+		k_work_schedule(&reboot_work, K_MSEC(200));
 		break;
 	default:
 		err = -EINVAL;

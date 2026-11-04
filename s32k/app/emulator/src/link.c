@@ -28,36 +28,70 @@ static uint8_t tx_seq;
 static int64_t last_peer_hello = -100000;
 static int64_t next_hello;
 
-static void link_isr(const struct device *dev, void *user_data)
+/*
+ * RX and TX run on DMA: the LPUART FIFO is only 4 bytes, 20 us at 2 Mbit/s, and with interrupts the
+ * first bytes after an idle line were lost to overruns (measured on FRDM-A-S32K312). Buffers are
+ * cache line aligned; the driver maintains the data cache around them.
+ */
+#define RX_BUF_SIZE 512
+static uint8_t rx_bufs[2][RX_BUF_SIZE] __aligned(32);
+static uint8_t rx_next;
+static bool tx_busy;
+
+
+static void start_tx(void)
+{
+	unsigned int key = irq_lock();
+
+	if (!tx_busy) {
+		uint8_t *p;
+		uint32_t n = ring_buf_get_ptr(&link_tx_rb, &p, 0);
+
+		if (n > 0) {
+			tx_busy = true;
+			if (uart_tx(link_uart, p, MIN(n, 512U), SYS_FOREVER_US) != 0) {
+				tx_busy = false;
+			}
+		}
+	}
+	irq_unlock(key);
+}
+
+static void uart_cb(const struct device *dev, struct uart_event *evt, void *user_data)
 {
 	ARG_UNUSED(user_data);
 
-	uart_irq_update(dev);
-	while (uart_irq_is_pending(dev)) {
-		if (uart_irq_rx_ready(dev)) {
-			uint8_t buf[32];
-			int n = uart_fifo_read(dev, buf, sizeof(buf));
+	switch (evt->type) {
+	case UART_TX_DONE:
+	case UART_TX_ABORTED:
+		ring_buf_consume(&link_tx_rb, evt->data.tx.len);
+		tx_busy = false;
+		start_tx();
+		break;
+	case UART_RX_RDY: {
+		uint32_t put = ring_buf_put(&link_rx_rb, evt->data.rx.buf + evt->data.rx.offset,
+					    evt->data.rx.len);
 
-			if (n > 0) {
-				uint32_t put = ring_buf_put(&link_rx_rb, buf, n);
-
-				link_stats.rx_bytes += n;
-				link_stats.rx_drops += n - put;
-				k_sem_give(&link_wake);
-			}
-		}
-		if (uart_irq_tx_ready(dev)) {
-			uint8_t *p;
-			uint32_t n = ring_buf_get_ptr(&link_tx_rb, &p, 0);
-
-			if (n == 0) {
-				uart_irq_tx_disable(dev);
-			} else {
-				int sent = uart_fifo_fill(dev, p, MIN(n, 64U));
-
-				ring_buf_consume(&link_tx_rb, sent > 0 ? sent : 0);
-			}
-		}
+		link_stats.rx_bytes += evt->data.rx.len;
+		link_stats.rx_drops += evt->data.rx.len - put;
+		k_sem_give(&link_wake);
+		break;
+	}
+	case UART_RX_BUF_REQUEST:
+		uart_rx_buf_rsp(dev, rx_bufs[rx_next], RX_BUF_SIZE);
+		rx_next ^= 1U;
+		break;
+	case UART_RX_STOPPED:
+		link_stats.uart_overrun += (evt->data.rx_stop.reason & UART_ERROR_OVERRUN) ? 1 : 0;
+		link_stats.uart_framing += (evt->data.rx_stop.reason & UART_ERROR_FRAMING) ? 1 : 0;
+		link_stats.uart_noise += (evt->data.rx_stop.reason & UART_ERROR_NOISE) ? 1 : 0;
+		break;
+	case UART_RX_DISABLED:
+		rx_next = 1U;
+		uart_rx_enable(dev, rx_bufs[0], RX_BUF_SIZE, 100);
+		break;
+	default:
+		break;
 	}
 }
 
@@ -75,7 +109,7 @@ int link_send(uint8_t type, const void *payload, uint16_t len)
 	} else {
 		ring_buf_put(&link_tx_rb, enc, n);
 		link_stats.tx_frames++;
-		uart_irq_tx_enable(link_uart);
+		start_tx();
 	}
 	k_mutex_unlock(&link_tx_lock);
 	return ret;
@@ -138,8 +172,16 @@ int link_init(link_frame_fn on_frame)
 	}
 	frame_handler = on_frame;
 	be_link_rx_init(&rx);
-	uart_irq_callback_user_data_set(link_uart, link_isr, NULL);
-	uart_irq_rx_enable(link_uart);
+	int err = uart_callback_set(link_uart, uart_cb, NULL);
+
+	if (err) {
+		return err;
+	}
+	rx_next = 1U;
+	err = uart_rx_enable(link_uart, rx_bufs[0], RX_BUF_SIZE, 100);
+	if (err) {
+		return err;
+	}
 	next_hello = k_uptime_get();
 	return 0;
 }

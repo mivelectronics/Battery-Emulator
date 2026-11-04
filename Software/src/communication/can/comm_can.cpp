@@ -113,6 +113,10 @@ static void on_link_frame(uint8_t iface, CAN_frame* frame) {
 
 static bool init_can_via_link() {
   bool any = false;
+  // Always up, even with no CAN user configured: the S32K watches for this module's presence
+  if (!can_link_begin()) {
+    return false;
+  }
   for (auto& r : can_receivers) {
     int iface = link_iface_of(r.first);
     if (iface < 0) {
