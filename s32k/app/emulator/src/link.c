@@ -11,7 +11,7 @@
 
 #include "can_io.h"
 
-#define FW_VERSION "s32k-emulator 0.2"
+#define FW_VERSION "s32k-emulator 0.3"
 
 static const struct device *const link_uart = DEVICE_DT_GET(DT_ALIAS(be_link));
 
@@ -19,7 +19,9 @@ RING_BUF_DECLARE(link_tx_rb, 8192);
 RING_BUF_DECLARE(link_rx_rb, 4096);
 static K_MUTEX_DEFINE(link_tx_lock);
 static K_SEM_DEFINE(link_wake, 0, 1);
-K_MSGQ_DEFINE(can_rx_q, sizeof(struct be_link_can), 64, 4);
+/* Plain CPU data, so DTCM. The DMA buffers below and the ring buffers stay in SRAM. */
+static char __dtcm_noinit_section __aligned(4) can_rx_q_buf[64 * sizeof(struct be_link_can)];
+static struct k_msgq can_rx_q;
 
 struct link_stats link_stats;
 static struct be_link_rx rx;
@@ -171,6 +173,7 @@ int link_init(link_frame_fn on_frame)
 		return -ENODEV;
 	}
 	frame_handler = on_frame;
+	k_msgq_init(&can_rx_q, can_rx_q_buf, sizeof(struct be_link_can), 64);
 	be_link_rx_init(&rx);
 	int err = uart_callback_set(link_uart, uart_cb, NULL);
 

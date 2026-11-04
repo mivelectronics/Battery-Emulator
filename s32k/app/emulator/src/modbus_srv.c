@@ -16,7 +16,9 @@
 #include <zephyr/sys/printk.h>
 
 #include "be_cfg.h"
+#include "be_core.h"
 #include "can_io.h"
+#include "sim_battery.h"
 #include "link.h"
 
 #define FW_VERSION_REG 0x0002 /* major << 8 | minor */
@@ -105,6 +107,8 @@ static int read_can(uint8_t i, uint16_t r, uint16_t *v)
 	case 8: *v = lo16(s->tx_err); break;
 	case 9: *v = s->nominal_kbps; break;
 	case 10: *v = s->data_kbps; break;
+	case 11: *v = hi16(s->tx_queue_drops); break;
+	case 12: *v = lo16(s->tx_queue_drops); break;
 	default: *v = 0; break;
 	}
 	return 0;
@@ -133,6 +137,14 @@ static uint16_t *cfg_reg16(struct be_cfg *c, uint16_t off, bool *is_u8)
 	case 40: return &c->battery_type;
 	case 41: return &c->battery2_type;
 	case 42: return &c->inverter_type;
+	case 43: *is_u8 = true; tmp8 = c->battery_iface; return &tmp8;
+	case 44: *is_u8 = true; tmp8 = c->battery2_iface; return &tmp8;
+	case 45: *is_u8 = true; tmp8 = c->inverter_iface; return &tmp8;
+	case 46: *is_u8 = true; tmp8 = c->soc_scaling; return &tmp8;
+	case 50: return &c->max_percentage;
+	case 51: return (uint16_t *)&c->min_percentage;
+	case 52: return &c->max_charge_dA;
+	case 53: return &c->max_discharge_dA;
 	default: return NULL;
 	}
 }
@@ -166,6 +178,17 @@ static int holding_reg_rd(uint16_t addr, uint16_t *reg)
 	}
 	if (addr >= REG_CFG_BASE && addr < REG_CFG_BASE + 100) {
 		return read_cfg(addr - REG_CFG_BASE, reg);
+	}
+#ifdef BE_SIM
+	if (addr >= 400 && addr < 500) {
+		return sim_battery_reg_read(addr, reg);
+	}
+#endif
+	if ((addr >= 200 && addr < 300) || (addr >= 500 && addr < 600) ||
+	    (addr >= 1000 && addr < 1100) || (addr >= 2000 && addr < 2100) ||
+	    (addr >= 3000 && addr < 4000)) {
+		*reg = 0;
+		return be_core_active() ? be_core_reg_read(addr, reg) : 0;
 	}
 	return -ENOTSUP;
 }
@@ -251,6 +274,14 @@ static int holding_reg_wr(uint16_t addr, uint16_t reg)
 		stage.mb_unit_id = (uint8_t)reg;
 	} else if (off == 32) {
 		stage.mb_parity = (uint8_t)reg;
+	} else if (off == 43) {
+		stage.battery_iface = (uint8_t)reg;
+	} else if (off == 44) {
+		stage.battery2_iface = (uint8_t)reg;
+	} else if (off == 45) {
+		stage.inverter_iface = (uint8_t)reg;
+	} else if (off == 46) {
+		stage.soc_scaling = (uint8_t)reg;
 	}
 	return 0;
 }

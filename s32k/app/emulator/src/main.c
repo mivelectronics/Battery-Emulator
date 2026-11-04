@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "be_cfg.h"
+#include "be_core.h"
 #include "can_io.h"
 #include "link.h"
 #include "modbus_srv.h"
@@ -58,8 +59,20 @@ static void on_link_frame(const struct be_link_frame *f)
 	}
 }
 
+static void core_can_rx(uint8_t iface, const struct can_frame *frame)
+{
+	be_core_rx_isr(iface, frame);
+}
+
 int main(void)
 {
+	/*
+	 * Reset escalation off (threshold 0): with the default of 15 the chip counts its resets, and a
+	 * device that restarts itself now and then must not stop doing so after some number of them.
+	 */
+	MC_RGM->DRET = 0;
+	MC_RGM->FRET = 0;
+
 	printk("\n=== BE S32K emulator (A+) on %s ===\n", CONFIG_BOARD_TARGET);
 	printk("reset flags: destructive 0x%08x functional 0x%08x\n", MC_RGM->DES, MC_RGM->FES);
 	/* The flags are write-1-to-clear and accumulate; clear them so the next start reports only
@@ -71,11 +84,13 @@ int main(void)
 		gpio_pin_configure_dt(&led, GPIO_OUTPUT_INACTIVE);
 	}
 	be_cfg_init();
-	can_io_init(link_queue_can_rx);
+	/* With a battery type set the core owns the CAN channels, otherwise they go to the link */
+	can_io_init(be_cfg.battery_type != 0 ? core_can_rx : link_queue_can_rx);
 	if (link_init(on_link_frame)) {
 		printk("link UART not ready\n");
 	}
 	modbus_srv_init();
+	be_core_start();
 
 	int64_t next_led = k_uptime_get(), next_stats = k_uptime_get() + 5000;
 
@@ -92,6 +107,9 @@ int main(void)
 		}
 		if (now >= next_stats) {
 			next_stats += 10000;
+			if (be_core_active()) {
+				be_core_print_status();
+			}
 			const struct be_link_stats *ls = link_rx_stats();
 
 			printk("cfg rev %u | link tx %u rx %u B ok %u crc %u frm %u ovf %u | uart or %u fe %u nf %u "

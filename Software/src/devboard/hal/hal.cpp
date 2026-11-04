@@ -32,6 +32,9 @@ void init_hal() {
 #elif defined(HW_MIV_ESP32ETH)
 #include "hw_miv_esp32eth.h"
   esp32hal = new MivEsp32EthHal();
+#elif defined(HW_MIV_S32K)
+#include "hw_miv_s32k.h"
+  esp32hal = new MivS32kHal();
 #else
 #error "No HW defined."
 #endif

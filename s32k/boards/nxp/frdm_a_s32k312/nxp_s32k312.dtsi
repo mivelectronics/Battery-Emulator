@@ -28,16 +28,14 @@
 			zephyr,memory-region = "DTCM";
 		};
 
-		/* Standby RAM (content retained in standby) */
-		stdby_ram: memory@20400000 {
+		/*
+		 * All 96 KB of SRAM as one region: the first 32 KB are the standby RAM, which in run mode
+		 * is ordinary memory (the start-up code initializes ECC over the whole chosen SRAM). No
+		 * standby retention is used.
+		 */
+		sram: memory@20400000 {
 			compatible = "mmio-sram";
-			reg = <0x20400000 DT_SIZE_K(32)>;
-		};
-
-		/* Run-mode SRAM */
-		sram: memory@20408000 {
-			compatible = "mmio-sram";
-			reg = <0x20408000 DT_SIZE_K(64)>;
+			reg = <0x20400000 DT_SIZE_K(96)>;
 		};
 
 		peripheral: peripheral@40000000 {

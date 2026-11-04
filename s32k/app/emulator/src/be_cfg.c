@@ -26,6 +26,18 @@ void be_cfg_defaults(struct be_cfg *cfg)
 	cfg->mb_unit_id = 1;
 	cfg->mb_parity = 2; /* Modbus RTU default: 8E1 */
 	cfg->mb_baud_div100 = 192;
+	cfg->battery_iface = 1;
+	cfg->battery2_iface = 2;
+	cfg->inverter_iface = 0;
+	cfg->max_percentage = 8000;
+	cfg->min_percentage = 2000;
+	cfg->max_charge_dA = 300;
+	cfg->max_discharge_dA = 300;
+#ifdef BE_SIM
+	/* Bench simulator: starts as a Kia/Hyundai 64 battery with a Pylon inverter */
+	cfg->battery_type = 17;
+	cfg->inverter_type = 10;
+#endif
 }
 
 int be_cfg_validate(const struct be_cfg *cfg)
@@ -47,6 +59,20 @@ int be_cfg_validate(const struct be_cfg *cfg)
 		}
 	}
 	if (cfg->mb_unit_id < 1 || cfg->mb_unit_id > 247 || cfg->mb_parity > 2) {
+		return -EINVAL;
+	}
+	if (cfg->battery_iface >= BE_NUM_CAN || cfg->battery2_iface >= BE_NUM_CAN ||
+	    cfg->inverter_iface >= BE_NUM_CAN || cfg->soc_scaling > 1) {
+		return -EINVAL;
+	}
+	if (cfg->battery_type != 0 && cfg->battery_iface == cfg->inverter_iface) {
+		return -EINVAL;
+	}
+	if (cfg->battery2_type != 0 && (cfg->battery2_iface == cfg->battery_iface ||
+					cfg->battery2_iface == cfg->inverter_iface)) {
+		return -EINVAL;
+	}
+	if (cfg->max_percentage > 10000 || cfg->min_percentage >= (int32_t)cfg->max_percentage) {
 		return -EINVAL;
 	}
 	switch (cfg->mb_baud_div100) {
@@ -111,7 +137,15 @@ int be_cfg_init(void)
 
 void be_cfg_system_reset(void)
 {
-	POWER_RequestResetMode(kMC_ME_DestructiveReset);
+	/*
+	 * The request is a two-word key sequence to MC_ME. An interrupt between the two words cancels it
+	 * and POWER_RequestResetMode() then waits forever: about 1 reset in 5 with CAN traffic running.
+	 *
+	 * Functional, not destructive: measured on FRDM-A-S32K312, the 8th destructive reset after a
+	 * flash load left the chip dead before the first line of the boot, with the escalation
+	 * thresholds at 0 and the flash intact. 29 functional resets in a row were fine. Cause not known.
+	 */
+	POWER_RequestResetMode(kMC_ME_FunctionalReset);
 	while (1) {
 		k_cpu_idle();
 	}

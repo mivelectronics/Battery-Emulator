@@ -9,7 +9,7 @@
 
 #include <stdint.h>
 
-#define BE_CFG_VERSION 1
+#define BE_CFG_VERSION 2
 #define BE_NUM_CAN     3
 
 struct be_cfg_can {
@@ -31,11 +31,25 @@ struct be_cfg {
 	uint8_t mb_parity; /* 0 none, 1 odd, 2 even */
 	uint16_t mb_baud_div100;
 
-	/* Emulator selection, indices of the upstream Battery-Emulator enums (stored, not used yet) */
+	/* Emulator selection, indices of the upstream Battery-Emulator enums. After a reboot. Battery type
+	 * 0 turns the core off and bridges CAN to the ESP32 over the link. Second battery: same type as
+	 * the first, any value other than 0 enables it. */
 	uint16_t battery_type;
 	uint16_t battery2_type;
 	uint16_t inverter_type;
 	uint16_t reserved1;
+
+	/* Which CAN channel each one uses (0 = CAN0, 1 = CAN1, 2 = CAN4). After a reboot. */
+	uint8_t battery_iface;
+	uint8_t battery2_iface;
+	uint8_t inverter_iface;
+	uint8_t soc_scaling; /* 1 = inverter sees the SOC scaled between the limits below */
+
+	/* Limits, same meaning and defaults as upstream's battery_settings. After a reboot. */
+	uint16_t max_percentage; /* SOC 0.01 %, top of the scaled window */
+	int16_t min_percentage;  /* SOC 0.01 %, bottom of the scaled window */
+	uint16_t max_charge_dA;
+	uint16_t max_discharge_dA;
 };
 
 /* Active configuration (what the firmware runs with) */
@@ -56,7 +70,7 @@ int be_cfg_reload(struct be_cfg *cfg);
 int be_cfg_validate(const struct be_cfg *cfg);
 
 /* Restarts the chip. On S32K3 / MCX E31x the Arm SYSRESETREQ used by sys_reboot() leaves the part
- * hung (seen on FRDM-A-S32K312); a reset through MC_ME works. Does not return. */
+ * hung (seen on FRDM-A-S32K312); a functional reset through MC_ME works. Does not return. */
 void be_cfg_system_reset(void);
 
 #endif /* BE_CFG_H */

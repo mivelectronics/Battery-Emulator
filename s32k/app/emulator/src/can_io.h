@@ -14,6 +14,7 @@
 
 struct can_io_stats {
 	uint32_t rx, tx_ok, tx_err, rx_drops;
+	uint32_t tx_queue_drops; /* frames for can_io_send_raw that did not fit in the software queue */
 	uint16_t nominal_kbps, data_kbps; /* what the channel actually runs at, 0 = stopped */
 };
 
@@ -33,6 +34,20 @@ int can_io_set_loopback(uint8_t iface, bool on);
 
 /* Non-blocking transmit. */
 int can_io_send(uint8_t iface, const struct can_frame *frame);
+
+/*
+ * Non-blocking transmit from plain values (for the C++ core, which must not see Zephyr headers).
+ * Goes through a software queue: the drivers send bursts, and a FlexCAN with 64-byte mailboxes has only
+ * a few of them. Only for the core thread, which also calls can_io_tx_pump() every tick.
+ */
+int can_io_send_raw(uint8_t iface, uint32_t id, bool ext, bool fd, uint8_t len, const uint8_t *data);
+void can_io_tx_pump(void);
+
+/* Runs a channel at this arbitration rate whatever be_cfg says: the driver on it knows best. */
+int can_io_set_nominal(uint8_t iface, uint16_t kbps);
+
+/* Stops all channels and refuses to send (true), or starts them again (false). */
+void can_io_pause(bool paused);
 
 /* State and error counters of a channel. */
 int can_io_state(uint8_t iface, enum can_state *state, struct can_bus_err_cnt *cnt);

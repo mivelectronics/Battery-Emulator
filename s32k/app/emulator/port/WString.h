@@ -1,0 +1,118 @@
+/*
+ * Copy of test/emul/WString.h with toFloat() added, which comm_nvm.cpp needs. Comes first in the include
+ * path of the S32K core.
+ */
+#include <stdlib.h>
+#ifndef WSTRING_H
+#define WSTRING_H
+
+#include <stdint.h>
+#include <iomanip>
+#include <iostream>
+#include <sstream>
+#include <string>
+
+class String {
+ private:
+  std::string data;
+
+ public:
+  // Constructors
+  String() = default;
+  String(const char* s) : data(s) {}
+  String(const std::string& s) : data(s) {}
+  String(const String& other) = default;
+  String(String&& other) = default;
+
+  // Numeric constructors (Arduino-style)
+  String(int value) { data = std::to_string(value); }
+  String(unsigned int value) { data = std::to_string(value); }
+  String(long value) { data = std::to_string(value); }
+  String(unsigned long value) { data = std::to_string(value); }
+  String(unsigned long long value) { data = std::to_string(value); }
+  String(float value) { data = std::to_string(value); }
+  String(double value) { data = std::to_string(value); }
+
+  String(float value, unsigned int decimalPlaces) {
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(decimalPlaces) << value;
+    data = oss.str();
+  }
+
+  // Assignment operators
+  String& operator=(const String& other) = default;
+  String& operator=(String&& other) = default;
+
+  // Conversion operator to std::string
+  operator std::string() const { return data; }
+
+  // This host shim does not simulate allocation failures; empty strings are valid too.
+  explicit operator bool() const { return true; }
+
+  // Accessor
+  const std::string& str() const { return data; }
+
+  // Comparison operators
+  bool operator==(const String& rhs) const { return data == rhs.data; }
+
+  // Concatenation
+  String operator+(const String& rhs) const { return String(data + rhs.data); }
+
+  String operator+(const std::string& rhs) const { return String(data + rhs); }
+
+  String operator+(const char* rhs) const { return String(data + std::string(rhs)); }
+
+  // Append
+  bool concat(const char* rhs) {
+    if (!rhs) {
+      return false;
+    }
+    data += rhs;
+    return true;
+  }
+
+  bool concat(const String& rhs) {
+    data += rhs.data;
+    return true;
+  }
+
+  bool concat(char rhs) {
+    data += rhs;
+    return true;
+  }
+
+  String& operator+=(const String& rhs) {
+    data += rhs.data;
+    return *this;
+  }
+
+  String& operator+=(const std::string& rhs) {
+    data += rhs;
+    return *this;
+  }
+
+  String& operator+=(const char* rhs) {
+    data += rhs;
+    return *this;
+  }
+
+  // Arduino-like methods (example)
+  int length() const { return static_cast<int>(data.length()); }
+  bool isEmpty() const { return data.empty(); }
+  float toFloat() const { return strtof(c_str(), nullptr); }
+  const char* c_str() const { return data.c_str(); }
+
+  // Arduino String::reserve returns bool; pre-allocates capacity.
+  bool reserve(unsigned int size) {
+    data.reserve(size);
+    return true;
+  }
+
+  // Friend functions to allow std::string + String
+  friend String operator+(const std::string& lhs, const String& rhs) { return String(lhs + rhs.data); }
+
+  friend String operator+(const char* lhs, const String& rhs) { return String(std::string(lhs) + rhs.data); }
+
+  friend std::ostream& operator<<(std::ostream& os, const String& s) { return os << s.data; }
+};
+#endif

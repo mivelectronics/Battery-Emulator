@@ -39,7 +39,7 @@ assert c.connect(), "cannot open " + port
 
 sysregs = rd(0, 10)
 print("system:", sysregs)
-check(sysregs[0] == 1, "map version 1")
+check(sysregs[0] == 2, "map version 2")
 up1 = sysregs[2] << 16 | sysregs[3]
 time.sleep(1.2)
 s2 = rd(2, 2)

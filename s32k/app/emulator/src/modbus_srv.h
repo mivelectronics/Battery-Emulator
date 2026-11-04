@@ -8,7 +8,7 @@
 
 #include <stdint.h>
 
-#define MB_MAP_VERSION 1
+#define MB_MAP_VERSION 2
 
 /* Starts the server on the "modbus0" devicetree node with the unit id/baud/parity of be_cfg. */
 int modbus_srv_init(void);
