@@ -32,7 +32,7 @@ extern "C" {
 
 enum be_link_type {
   BE_LINK_HELLO = 1,    /* struct be_link_hello, sent by both sides after start */
-  BE_LINK_SNAPSHOT = 2, /* struct be_link_chunk_hdr + part of the datalayer snapshot (CAN -> NET) */
+  BE_LINK_SNAPSHOT = 2, /* one section of the live state, see be_snapshot.cpp (CAN -> NET) */
   BE_LINK_SETTINGS = 3, /* struct be_link_chunk_hdr + part of the settings blob (NET -> CAN) */
   BE_LINK_CMD = 4,      /* struct be_link_cmd (NET -> CAN) */
   BE_LINK_CAN = 5,      /* struct be_link_can, raw CAN frame (bridge mode, replay, dump) */
@@ -62,9 +62,9 @@ struct be_link_hello {
   char fw_version[24];  /* NUL padded */
 } BE_LINK_PACKED;
 
-/* Large objects (snapshot, settings, OTA image) travel in chunks */
+/* Large objects (settings, OTA image) travel in chunks */
 struct be_link_chunk_hdr {
-  uint32_t object_id; /* layout hash for snapshots/settings, image id for OTA */
+  uint32_t object_id; /* layout hash for settings, image id for OTA */
   uint32_t total;     /* total object size in bytes */
   uint32_t offset;    /* offset of this chunk */
 } BE_LINK_PACKED;

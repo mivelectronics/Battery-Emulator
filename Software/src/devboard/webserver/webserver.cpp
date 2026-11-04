@@ -1,3 +1,4 @@
+#include "../../communication/link/be_snapshot.h"
 #include "webserver.h"
 #include <Preferences.h>
 #include <esp_random.h>
@@ -1764,6 +1765,15 @@ static bool render_live(CheckedHtml& content) {
 
     // Close the block
     content += "</div>";
+
+#ifdef CAN_VIA_LINK
+    if (be_remote_active()) {
+      content +=
+          "<div style='background-color: #a33; padding: 10px; margin-bottom: 10px; border-radius: 50px'>"
+          "<h4 style='color: white;'>Battery and inverter run on the S32K. This page shows their data. "
+          "Buttons and settings here do not reach the S32K yet, contactors included: use Modbus.</h4></div>";
+    }
+#endif
 
 #ifndef SMALL_FLASH_DEVICE
     const bool charger_in_use = charger != nullptr;

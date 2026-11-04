@@ -12,6 +12,7 @@
 #endif  // SMALL_FLASH_DEVICE
 #include "src/communication/Transmitter.h"
 #include "src/communication/can/comm_can.h"
+#include "src/communication/link/be_snapshot.h"
 #include "src/communication/contactorcontrol/comm_contactorcontrol.h"
 #include "src/communication/equipmentstopbutton/comm_equipmentstopbutton.h"
 #include "src/communication/nvm/comm_nvm.h"
@@ -565,6 +566,16 @@ void core_loop(void*) {
        has. It sets a flag; loop() does the writing (ota_confirm_gate.h). */
     ota_confirm_check(currentMillis);
 
+#ifdef CAN_VIA_LINK
+    // The core runs on the S32K: receive_can() above fills the datalayer, nothing below applies
+    if (be_remote_active()) {
+      be_remote_tick(currentMillis);
+      esp_task_wdt_reset();
+      vTaskDelayUntil(&xLastWakeTime, xFrequency);
+      continue;
+    }
+#endif
+
     loopPhase = 1 - loopPhase;  // Spread out slower tasks across multiple iterations
     if (currentMillis - previousMillis10ms >= INTERVAL_10_MS && loopPhase == 0) {
       if ((currentMillis - previousMillis10ms >= INTERVAL_10_MS_DELAYED) &&
@@ -670,6 +681,22 @@ void mqtt_loop(void*) {
     mqtt_client_loop();
     END_TIME_MEASUREMENT_MAX(mqtt, datalayer.system.status.mqtt_task_10s_max_us);
     delay(100);
+  }
+}
+
+static void start_mqtt() {
+  static bool started = false;
+
+  if (!mqtt_enabled || started) {
+    return;
+  }
+  started = true;
+  if (init_mqtt()) {
+    logging.println("MQTT initialized successfully.");
+    xTaskCreatePinnedToCore((TaskFunction_t)&mqtt_loop, "mqtt_loop", 4096, NULL, TASK_MQTT_PRIO, &mqtt_loop_task,
+                            esp32hal->WIFICORE());
+  } else {
+    logging.println("MQTT failed to initialize. MQTT will be disabled.");
   }
 }
 
@@ -787,16 +814,14 @@ void setup() {
 
   // Start tasks
 
-  if (mqtt_enabled) {
-
-    if (init_mqtt()) {
-      logging.println("MQTT initialized successfully.");
-      xTaskCreatePinnedToCore((TaskFunction_t)&mqtt_loop, "mqtt_loop", 4096, NULL, TASK_MQTT_PRIO, &mqtt_loop_task,
-                              esp32hal->WIFICORE());
-    } else {
-      logging.println("MQTT failed to initialize. MQTT will be disabled.");
-    }
+#ifdef CAN_VIA_LINK
+  // With the core on the S32K there is no battery until its first HELLO: loop() starts MQTT then
+  if (battery) {
+    start_mqtt();
   }
+#else
+  start_mqtt();
+#endif
 
   xTaskCreatePinnedToCore((TaskFunction_t)&core_loop, "core_loop", 4096, NULL, TASK_CORE_PRIO, &main_loop_task,
                           esp32hal->CORE_FUNCTION_CORE());
@@ -819,4 +844,9 @@ void setup() {
 // it.
 void loop() {
   ota_confirm_service();
+#ifdef CAN_VIA_LINK
+  if (be_remote_active()) {
+    start_mqtt();
+  }
+#endif
 }

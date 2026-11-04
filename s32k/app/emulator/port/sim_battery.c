@@ -25,10 +25,14 @@
 #define SIM_TEMP_MIN_C   20    /* 0x596 */
 #define SIM_TEMP_MAX_C   25    /* 0x596 */
 
-static const struct sim_uds_response *pending;
-static uint8_t pending_iface;
-static uint8_t pending_next;
-static int64_t next_100ms, next_1s, next_cf;
+/* One UDS exchange in progress per CAN channel */
+struct sim_uds_state {
+	const struct sim_uds_response *pending;
+	uint8_t next;
+	int64_t next_cf;
+};
+static struct sim_uds_state uds[BE_NUM_CAN];
+static int64_t next_100ms, next_1s;
 static uint8_t inverter_421x[8];
 static uint32_t inverter_421x_count;
 
@@ -84,11 +88,15 @@ void sim_battery_tick(void)
 		(void)can_io_send_raw(be_cfg.inverter_iface, 0x4200, true, false, 8, f4200);
 	}
 	/* The consecutive frames of a UDS answer, 10 ms apart like in the capture */
-	if (pending != NULL && pending_next != 0xFF && now >= next_cf) {
-		next_cf = now + 10;
-		send8(pending_iface, 0x7EC, pending->frames[pending_next]);
-		if (++pending_next >= pending->n_frames) {
-			pending = NULL;
+	for (uint8_t i = 0; i < BE_NUM_CAN; i++) {
+		struct sim_uds_state *u = &uds[i];
+
+		if (u->pending != NULL && u->next != 0xFF && now >= u->next_cf) {
+			u->next_cf = now + 10;
+			send8(i, 0x7EC, u->pending->frames[u->next]);
+			if (++u->next >= u->pending->n_frames) {
+				u->pending = NULL;
+			}
 		}
 	}
 }
@@ -111,21 +119,22 @@ bool sim_battery_on_frame(const struct be_can_rx *f)
 			return false;
 		}
 	}
+	struct sim_uds_state *u = &uds[f->iface];
+
 	if (f->data[0] == 0x03 && f->data[1] == 0x22) {
 		uint16_t pid = (f->data[2] << 8) | f->data[3];
 
-		pending = NULL;
+		u->pending = NULL;
 		for (size_t i = 0; i < ARRAY_SIZE(sim_uds_responses); i++) {
 			if (sim_uds_responses[i].pid == pid) {
 				send8(f->iface, 0x7EC, sim_uds_responses[i].frames[0]);
-				pending = &sim_uds_responses[i];
-				pending_iface = f->iface;
-				pending_next = 0xFF; /* waits for flow control */
+				u->pending = &sim_uds_responses[i];
+				u->next = 0xFF; /* waits for flow control */
 				break;
 			}
 		}
-	} else if ((f->data[0] & 0xF0) == 0x30 && pending != NULL && pending_next == 0xFF) {
-		pending_next = 1;
+	} else if ((f->data[0] & 0xF0) == 0x30 && u->pending != NULL && u->next == 0xFF) {
+		u->next = 1;
 	}
 	return false;
 }

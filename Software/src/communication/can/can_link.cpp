@@ -10,6 +10,7 @@
 #include "../../devboard/hal/hw_miv_esp32eth_pins.h"
 #include "../../devboard/utils/logging.h"
 #include "../link/be_link.h"
+#include "../link/be_snapshot.h"
 
 static constexpr uint32_t LINK_BAUD = 2000000;
 static bool started = false;
@@ -193,7 +194,11 @@ void can_link_poll(void (*on_frame)(uint8_t iface, CAN_frame* frame)) {
             hello_seen = true;
           }
           last_hello_ms = millis();
+          be_remote_on_hello(h.reserved, h.layout_hash);
         } break;
+        case BE_LINK_SNAPSHOT:
+          be_remote_on_snapshot(f.payload, f.len);
+          break;
         case BE_LINK_LOG: {
           char text[161];
           size_t len = f.len < 160 ? f.len : 160;

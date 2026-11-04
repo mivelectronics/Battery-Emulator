@@ -12,6 +12,7 @@
 #include <list>
 
 #include "src/battery/BATTERIES.h"
+#include "src/communication/link/be_snapshot.h"
 #include "src/charger/CHARGERS.h"
 #include "src/communication/Transmitter.h"
 #include "src/communication/can/comm_can.h"
@@ -35,6 +36,12 @@
 extern "C" {
 #include "be_cfg.h"
 int printk(const char* fmt, ...);
+int link_send(uint8_t type, const void* payload, uint16_t len);
+bool link_peer_alive(void);
+}
+
+static int send_snapshot(const void* payload, uint16_t len) {
+  return link_send(2 /* BE_LINK_SNAPSHOT */, payload, len);
 }
 
 CAN_Interface be_core_can_interface(uint8_t iface);
@@ -57,8 +64,13 @@ static float temperatureRead() {
   return 0.0f;
 }
 extern "C" uint32_t port_free_heap(void);
+// Upstream raises LOW_HEAP_MEMORY below 62 KB, a figure for the ESP32; the heap here is 16 KB in total
+// and stops growing once the drivers exist. Only a really low value goes through. Modbus 221 has the truth.
 struct PortEsp {
-  uint32_t getFreeHeap() { return port_free_heap(); }
+  uint32_t getFreeHeap() {
+    const uint32_t free_bytes = port_free_heap();
+    return free_bytes < 2000 ? free_bytes : 100000;
+  }
 };
 static PortEsp port_esp;
 #define ESP port_esp
@@ -111,6 +123,7 @@ void be_core_setup(void) {
 
 void be_core_tick(void) {
   static int loopPhase = 0;
+  static bool snapshot_sending = false;
 
   receive_can();
   receive_rs485();
@@ -162,6 +175,12 @@ void be_core_tick(void) {
       inverter->update_values();
     }
     update_restart_progress();
+
+    snapshot_sending = link_peer_alive();
+  }
+
+  if (snapshot_sending) {
+    snapshot_sending = !be_snapshot_send_step(send_snapshot);
   }
 
   for (auto& transmitter : transmitters) {

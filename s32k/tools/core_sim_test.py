@@ -171,7 +171,7 @@ check("Modbus still answers without the core", rd(0)[0] == 2)
 wr(5000, 0xA5C3)
 wr(5001, 3)
 wr(5001, 1)
-wr(5000, 0)
+wr(5001, 0xB007)
 
 print("ALL PASSED" if failures == 0 else f"{failures} FAILED")
 sys.exit(1 if failures else 0)

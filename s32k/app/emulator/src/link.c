@@ -9,9 +9,11 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/sys/ring_buffer.h>
 
+#include "be_core.h"
+#include "be_snapshot.h"
 #include "can_io.h"
 
-#define FW_VERSION "s32k-emulator 0.3"
+#define FW_VERSION "s32k-emulator 0.4"
 
 static const struct device *const link_uart = DEVICE_DT_GET(DT_ALIAS(be_link));
 
@@ -122,6 +124,8 @@ static void send_hello(void)
 	struct be_link_hello h = {
 		.proto_version = BE_LINK_PROTO_VERSION,
 		.role = BE_LINK_ROLE_CAN,
+		.reserved = be_core_active() ? BE_HELLO_FLAG_CORE_ACTIVE : 0,
+		.layout_hash = be_snapshot_layout_hash(),
 	};
 
 	strncpy(h.fw_version, FW_VERSION, sizeof(h.fw_version) - 1);
@@ -150,6 +154,11 @@ void link_queue_can_rx(uint8_t iface, const struct can_frame *frame)
 static void handle_can(const struct be_link_frame *f)
 {
 	struct be_link_can m = {0};
+
+	/* The core owns the channels. Nothing from the ESP32 goes on the bus next to the drivers here */
+	if (be_core_active()) {
+		return;
+	}
 
 	memcpy(&m, f->payload, MIN(f->len, sizeof(m)));
 	if (m.len > 64) {

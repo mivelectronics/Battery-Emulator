@@ -29,7 +29,12 @@ static void on_link_frame(const struct be_link_frame *f)
 		struct be_link_cmd c = {0};
 
 		memcpy(&c, f->payload, MIN(f->len, sizeof(c)));
-		if (c.code == 1) {
+		if (c.code == 1 && be_core_active()) {
+			/* The drivers set the bit rates. The ESP32 asks at start from its own settings */
+			struct be_link_ack a = {.acked_type = f->type, .acked_seq = f->seq, .status = -EPERM};
+
+			link_send(BE_LINK_ACK, &a, sizeof(a));
+		} else if (c.code == 1) {
 			uint8_t iface = c.arg0 & 0xFF;
 			struct be_cfg next = be_cfg;
 			int err = -EINVAL;
@@ -50,7 +55,7 @@ static void on_link_frame(const struct be_link_frame *f)
 						.status = (int16_t)err};
 
 			link_send(BE_LINK_ACK, &a, sizeof(a));
-		} else if (c.code == 2) {
+		} else if (c.code == 2 && !be_core_active()) {
 			/* Diagnostic: internal loopback, arg0 = iface, arg1 = on/off */
 			int err = can_io_set_loopback((uint8_t)c.arg0, c.arg1 != 0);
 
