@@ -167,14 +167,28 @@ tick = rd(222)[0]
 print(f"     longest core tick after saving the form: {tick} us")
 check("flash writes do not stall the core beyond 10 ms", tick < 10000, tick)
 
-# A combination the S32K cannot run: refused, and the page shows what it runs with
+# The battery on CAN0, where the inverter is: one bus for both
 form = settings_form()
 check("settings page shows the battery channel", form.get("BATTCOMM") == "6", form.get("BATTCOMM"))
-form["BATTCOMM"] = "3"  # CAN0, where the inverter is
+form["BATTCOMM"] = "3"
+save_form(form)
+wait_for("one bus for battery and inverter reaches the S32K", lambda: rd(5043)[0] == 0)
+wait_for("and shows on the page", lambda: settings_form().get("BATTCOMM") == "3", 15)
+form = settings_form()
+form["BATTCOMM"] = "6"
+save_form(form)
+wait_for("back on its own channel", lambda: rd(5043)[0] == 1)
+wait_for("and shows on the page", lambda: settings_form().get("BATTCOMM") == "6", 15)
+
+# A combination the S32K cannot run: refused, and the page shows what it runs with
+form = settings_form()
+form["DBLBTR"] = "on"
+form["BATT2COMM"] = "3"  # CAN0, where the inverter is
 save_form(form)
 time.sleep(1.5)
-wait_for("invalid combination refused, page back to the real channel", lambda: settings_form().get("BATTCOMM") == "6", 15)
-check("S32K kept its channel", rd(5043)[0] == 1, rd(5043)[0])
+wait_for("invalid combination refused, page back to the real settings",
+         lambda: settings_form().get("BATT2COMM") != "3" and "DBLBTR" not in settings_form(), 15)
+check("S32K kept its settings", rd(5041)[0] == 0 and rd(5044)[0] == 2, rd(5040, 6))
 
 # Modbus to the page: the S32K holds the truth
 client.write_register(5000, 0xA5C3, device_id=1)

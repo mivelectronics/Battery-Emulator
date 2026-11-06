@@ -188,7 +188,12 @@ bool sim_battery_on_frame(const struct be_can_rx *f)
 			memcpy(inverter_421x, f->data, 8);
 			inverter_421x_count++;
 		}
-		return f->id == 0x4200; /* the only frame from the simulated inverter */
+		if (f->id == 0x4200) {
+			return true; /* the only frame from the simulated inverter */
+		}
+	}
+	if (f->iface != be_cfg.battery_iface && (be_cfg.battery2_type == 0 || f->iface != be_cfg.battery2_iface)) {
+		return false;
 	}
 	if (f->id != 0x7E4) {
 		/* Frames from the simulated battery go to the driver, its own 0x2xx/0x5xx do not */

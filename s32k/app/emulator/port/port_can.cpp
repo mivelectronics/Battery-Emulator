@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include <string.h>
+#include <zephyr/sys/printk.h>
 
 #include "src/communication/can/CanReceiver.h"
 #include "src/communication/can/comm_can.h"
@@ -26,11 +27,14 @@ volatile CAN_Configuration can_config = {.battery = CANFD_ADDON_MCP2518,
 
 static const CAN_Interface iface_map[3] = {CAN_NATIVE, CANFD_ADDON_MCP2518, CANFD_ADDON_MCP2518_2};
 
-struct Registered {
-  CanReceiver* receiver;
+// More than one on a channel: the battery and the inverter can share a bus
+static constexpr int RECEIVERS_PER_CHANNEL = 3;
+struct Channel {
+  CanReceiver* receivers[RECEIVERS_PER_CHANNEL];
+  int count;
   CAN_Speed speed;
 };
-static Registered registered[3];
+static Channel channels[3];
 
 static int to_iface(CAN_Interface interface) {
   for (int i = 0; i < 3; i++) {
@@ -48,15 +52,29 @@ CAN_Interface be_core_can_interface(uint8_t iface) {
 void register_can_receiver(CanReceiver* receiver, CAN_Interface interface, CAN_Speed speed) {
   int i = to_iface(interface);
 
-  if (i >= 0) {
-    registered[i] = {receiver, speed};
+  if (i < 0) {
+    return;
   }
+  Channel& c = channels[i];
+
+  if (c.count == RECEIVERS_PER_CHANNEL) {
+    printk("%s: no room for another CAN receiver\n", getCANInterfaceName(interface));
+    return;
+  }
+  // One bus has one speed. The first one stays, and the other side raises its own missing event.
+  if (c.count == 0) {
+    c.speed = speed;
+  } else if (c.speed != speed) {
+    printk("%s: asked for %u kbps, runs at %u kbps\n", getCANInterfaceName(interface), static_cast<unsigned int>(speed),
+           static_cast<unsigned int>(c.speed));
+  }
+  c.receivers[c.count++] = receiver;
 }
 
 bool init_CAN() {
   for (uint8_t i = 0; i < 3; i++) {
-    if (registered[i].receiver != nullptr) {
-      can_io_set_nominal(i, static_cast<uint16_t>(registered[i].speed));
+    if (channels[i].count > 0) {
+      can_io_set_nominal(i, static_cast<uint16_t>(channels[i].speed));
     }
   }
   return true;
@@ -66,9 +84,7 @@ void receive_can() {
   struct be_can_rx rx;
 
   while (be_core_rx_pop(&rx)) {
-    CanReceiver* receiver = rx.iface < 3 ? registered[rx.iface].receiver : nullptr;
-
-    if (receiver == nullptr) {
+    if (rx.iface >= 3) {
       continue;
     }
     CAN_frame frame = {};
@@ -77,7 +93,9 @@ void receive_can() {
     frame.DLC = rx.len;
     frame.ID = rx.id;
     memcpy(frame.data.u8, rx.data, rx.len);
-    receiver->receive_can_frame(&frame);
+    for (int n = 0; n < channels[rx.iface].count; n++) {
+      channels[rx.iface].receivers[n]->receive_can_frame(&frame);
+    }
   }
 }
 

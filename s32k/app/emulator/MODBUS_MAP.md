@@ -62,7 +62,7 @@ Settings registers show and edit a staging copy. Nothing changes in operation un
 | 5042 | inverter protocol: index of the upstream `InverterProtocolType` enum (10 = Pylon). After reboot | unlocked |
 | 5043 | CAN channel of battery 1: 0 = CAN0, 1 = CAN1, 2 = CAN4 (default 1). After reboot | unlocked |
 | 5044 | CAN channel of battery 2 (default 2). After reboot | unlocked |
-| 5045 | CAN channel of the inverter (default 0). After reboot | unlocked |
+| 5045 | CAN channel of the inverter (default 0). It may be the channel of battery 1, for one bus to both. Battery 2 needs a channel of its own. After reboot | unlocked |
 | 5046 | SOC scaling towards the inverter: 1/0. After reboot | unlocked |
 | 5050 | top of the SOC window, 0.01 % (default 8000). After reboot | unlocked |
 | 5051 | bottom of the SOC window, 0.01 %, int16 (default 2000). After reboot | unlocked |

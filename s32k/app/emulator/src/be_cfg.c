@@ -67,9 +67,7 @@ int be_cfg_validate(const struct be_cfg *cfg)
 	    cfg->inverter_iface >= BE_NUM_CAN || cfg->soc_scaling > 1) {
 		return -EINVAL;
 	}
-	if (cfg->battery_type != 0 && cfg->battery_iface == cfg->inverter_iface) {
-		return -EINVAL;
-	}
+	/* The battery and the inverter may share a bus. Two batteries of a type send the same IDs. */
 	if (cfg->battery2_type != 0 && (cfg->battery2_iface == cfg->battery_iface ||
 					cfg->battery2_iface == cfg->inverter_iface)) {
 		return -EINVAL;
