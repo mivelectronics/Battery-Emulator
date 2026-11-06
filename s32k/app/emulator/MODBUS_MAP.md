@@ -20,6 +20,12 @@ addresses inside a block read as 0; addresses outside the blocks return exceptio
 | 7 | settings unlocked: 1/0 |
 | 8 | result of the last command (0 ok, negative errno as int16) |
 | 9 | unsaved edits in the staging copy: 1/0 |
+| 10 | what started this run: 0 power on, 1 requested restart, 2 watchdog with the interrupts alive, 3 CPU fault or assert, 4 watchdog with the interrupts dead (hardware reset), 5 reset pin, 6 other |
+| 11 | watchdog and fault restarts in a row, as counted at the start of this run. A requested restart or power off starts the count over, and so does the next start after 10 minutes of running |
+| 12 | outputs still enabled at the start, bit per output as in 226. Must be 0: the reset released the pads |
+| 13 | watchdog running: 1/0 |
+| 14–15 | MC_RGM DES as it was at the start (u32), destructive reset flags |
+| 16–17 | MC_RGM FES as it was at the start (u32), functional reset flags |
 
 ## 100–159: CAN channels (read only), 20 registers per channel
 
@@ -62,6 +68,10 @@ Settings registers show and edit a staging copy. Nothing changes in operation un
 | 5051 | bottom of the SOC window, 0.01 %, int16 (default 2000). After reboot | unlocked |
 | 5052 | maximum charge current, 0.1 A (default 300). After reboot | unlocked |
 | 5053 | maximum discharge current, 0.1 A (default 300). After reboot | unlocked |
+| 5054 | contactor control from the outputs of this board: 1/0 (default 0). After reboot | unlocked |
+| 5055 | a contactor for battery 2 on its own output: 1/0 (default 0). After reboot | unlocked |
+| 5056 | normally closed contactors, inverted outputs: 1/0 (default 0). After reboot | unlocked |
+| 5057 | precharge time, ms, 10–60000 (default 100). At once | unlocked |
 
 Every write while unlocked extends the unlock window. Writes while locked return exception 02.
 An invalid configuration is refused by command 1 with result -22 (EINVAL) and nothing is saved.
@@ -93,6 +103,8 @@ An invalid configuration is refused by command 1 with result -22 (EINVAL) and no
 | 223 | received CAN frames dropped (queue full) |
 | 224 | free stack of the core thread, bytes |
 | 225 | number of upstream settings stored by name, those saved from the ESP32 web page |
+| 226 | level on the pads, read back: bit 0 positive contactor, 1 negative, 2 precharge, 3 battery 2 contactor, 4 BMS power, 5 stop button input. 0 for pins not in use |
+| 227 | contactors locked out after 3 watchdog or fault restarts in a row: 1/0. A requested restart clears it |
 
 210–220 are the combined view of all packs, what the inverter driver reads.
 
@@ -134,7 +146,7 @@ An invalid configuration is refused by command 1 with result -22 (EINVAL) and no
 
 ## 3000–3191, 3500–3691: cell voltages of battery 1, battery 2 (read only, mV, one register per cell)
 
-## 400–409: bench simulator (only in builds with BE_SIM)
+## 400–492: bench simulator (only in builds with BE_SIM)
 
 | Reg | Meaning |
 |---|---|
@@ -143,6 +155,12 @@ An invalid configuration is refused by command 1 with result -22 (EINVAL) and no
 | 409 | count of those frames |
 | 410 | UDS requests to the battery other than the regular polls |
 | 411 | stored settings with a network name (must stay 0: they stay on the ESP32) |
+| 412 | previous run: ms from the start of a requested hang until the outputs were turned off |
+| 413 | changes of the stored plain settings since the start |
+| 420 | number of output changes in the trace, up to 24 |
+| 421 + 3·n | output change n: output number \| level << 8, then time in ms (u32) |
+
+Writing register 400 asks the simulator for something, without unlocking: 1 battery goes silent, 2 battery back, 3 clear the trace, and to test the watchdog 11 core thread spins, 12 core thread spins with the interrupts locked, 13 core thread stops, 14 core thread reads an address with nothing behind it, 15 main thread stops.
 
 ## Home Assistant example
 

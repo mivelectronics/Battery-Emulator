@@ -1,6 +1,6 @@
 /*
  * The functions test/emul/Arduino.h declares, on Zephyr. Same header as the host unit tests, so the
- * upstream code compiles the same way, but time is real and nothing records pin writes.
+ * upstream code compiles the same way, but time and pins are real.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -11,6 +11,7 @@ uint64_t port_uptime_ms(void);
 uint32_t port_micros(void);
 void port_delay_ms(uint32_t ms);
 void port_delay_us(uint32_t us);
+#include "be_gpio.h"
 }
 
 void delay(unsigned long ms) {
@@ -37,17 +38,22 @@ uint64_t get_timestamp(unsigned long ms) {
   return ms;
 }
 
-// No contactor or LED outputs on the S32K yet: every pin is GPIO_NUM_NC (hw_miv_s32k.h)
-void pinMode(uint8_t pin, uint8_t mode) {}
-void digitalWrite(uint8_t pin, uint8_t val) {}
+// The pin numbers come from hw_miv_s32k.h. GPIO_NUM_NC arrives here as 255 and is ignored.
+void pinMode(uint8_t pin, uint8_t mode) {
+  be_gpio_configure(pin, mode == OUTPUT);
+}
+void digitalWrite(uint8_t pin, uint8_t val) {
+  be_gpio_write(pin, val != 0);
+}
 int digitalRead(uint8_t pin) {
-  return 0;
+  return be_gpio_read(pin);
 }
 
 int max(int a, int b) {
   return (a > b) ? a : b;
 }
 
+// No PWM: the economized hold of the contactors is refused with its setting (be_link_cmd.c)
 bool ledcAttachChannel(uint8_t pin, uint32_t freq, uint8_t resolution, int8_t channel) {
   return true;
 }

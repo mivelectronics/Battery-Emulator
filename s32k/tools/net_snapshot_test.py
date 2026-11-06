@@ -74,7 +74,8 @@ def save_and_reboot(settings):
     for addr, value in settings.items():
         wr(addr, value)
     wr(5001, 1)
-    time.sleep(0.5)
+    assert rd(5001)[0] == 0, f"settings refused: {rd(5040, 6)}"
+    time.sleep(3)  # the page of the ESP32 follows, about 70 frames
     wr(5001, 0xB007)
     time.sleep(3)
 

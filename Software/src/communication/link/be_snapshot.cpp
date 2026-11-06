@@ -1,4 +1,5 @@
 #include "be_snapshot.h"
+#include "../contactorcontrol/comm_contactorcontrol.h"
 
 #if defined(HW_MIV_S32K) || defined(CAN_VIA_LINK)
 
@@ -47,6 +48,8 @@ static constexpr uint16_t F_BATTERY_DETECTED = 1u << 8;
 static constexpr uint16_t F_ALLOWED_TO_SEND_CAN = 1u << 9;
 static constexpr uint16_t F_BATTERY2_DETECTED = 1u << 10;
 static constexpr uint16_t F_BATTERY3_DETECTED = 1u << 11;
+static constexpr uint16_t F_CONTACTOR_CONTROL = 1u << 12;
+static constexpr uint16_t F_CONTACTOR2_CONTROL = 1u << 13;
 
 // be_snap_system.supports: what the real driver can do, so the pages offer the same buttons
 #define BE_SUPPORTS(X)                                        \
@@ -314,7 +317,8 @@ static void send_system(int (*send)(const void*, uint16_t)) {
             (st.contactors_battery2_engaged ? F_CONTACTORS2 : 0) | (st.contactors_battery3_engaged ? F_CONTACTORS3 : 0) |
             (info.equipment_stop_active ? F_EQUIPMENT_STOP : 0) | (battery_detected ? F_BATTERY_DETECTED : 0) |
             (allowed_to_send_CAN ? F_ALLOWED_TO_SEND_CAN : 0) | (battery2_detected ? F_BATTERY2_DETECTED : 0) |
-            (battery3_detected ? F_BATTERY3_DETECTED : 0);
+            (battery3_detected ? F_BATTERY3_DETECTED : 0) | (contactor_control_enabled ? F_CONTACTOR_CONTROL : 0) |
+            (contactor_control_enabled_double_battery ? F_CONTACTOR2_CONTROL : 0);
   m.battery_type = (uint16_t)user_selected_battery_type;
   m.inverter_type = (uint16_t)user_selected_inverter_protocol;
   m.settings_revision = be_settings_revision();
@@ -779,6 +783,9 @@ static void apply_system(const be_snap_system& m) {
   battery2_detected = (m.flags & F_BATTERY2_DETECTED) != 0;
   battery3_detected = (m.flags & F_BATTERY3_DETECTED) != 0;
   allowed_to_send_CAN = (m.flags & F_ALLOWED_TO_SEND_CAN) != 0;
+  // What the status page shows: the S32K may have started with other settings than this side
+  contactor_control_enabled = (m.flags & F_CONTACTOR_CONTROL) != 0;
+  contactor_control_enabled_double_battery = (m.flags & F_CONTACTOR2_CONTROL) != 0;
 
   // In RAM only, so that the pages name the right types. Saving the settings page does not change the S32K.
   user_selected_battery_type = (BatteryType)m.battery_type;

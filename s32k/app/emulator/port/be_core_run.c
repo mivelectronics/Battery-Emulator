@@ -27,6 +27,7 @@ static struct k_thread core_thread_data;
 static bool active;
 uint32_t be_core_rx_drops;
 uint32_t be_core_tick_max_us;
+volatile uint32_t be_core_ticks;
 
 uint16_t be_core_stack_free(void)
 {
@@ -86,6 +87,7 @@ static void core_thread(void *a, void *b, void *c)
 		sim_battery_tick();
 		be_core_tick();
 		can_io_tx_pump();
+		be_core_ticks++;
 
 		uint32_t us = k_cyc_to_us_floor32(k_cycle_get_32() - t0);
 

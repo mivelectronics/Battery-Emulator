@@ -34,6 +34,7 @@ void be_cfg_defaults(struct be_cfg *cfg)
 	cfg->min_percentage = 2000;
 	cfg->max_charge_dA = 300;
 	cfg->max_discharge_dA = 300;
+	cfg->precharge_ms = 100;
 #ifdef BE_SIM
 	/* Bench simulator: starts as a Kia/Hyundai 64 battery with a Pylon inverter */
 	cfg->battery_type = 17;
@@ -74,6 +75,11 @@ int be_cfg_validate(const struct be_cfg *cfg)
 		return -EINVAL;
 	}
 	if (cfg->max_percentage > 10000 || cfg->min_percentage >= (int32_t)cfg->max_percentage) {
+		return -EINVAL;
+	}
+	/* Closing without a real precharge time would be the inrush the precharge is there to prevent */
+	if (cfg->contactor_ctrl > 1 || cfg->contactor2_ctrl > 1 || cfg->contactor_nc > 1 ||
+	    cfg->precharge_ms < 10 || cfg->precharge_ms > 60000) {
 		return -EINVAL;
 	}
 	switch (cfg->mb_baud_div100) {

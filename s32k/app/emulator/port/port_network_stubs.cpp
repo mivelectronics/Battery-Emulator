@@ -8,7 +8,6 @@
 #include <WString.h>
 #include <string>
 
-#include "src/communication/equipmentstopbutton/comm_equipmentstopbutton.h"
 #include "src/devboard/mqtt/mqtt.h"
 #include "src/devboard/network/hostname.h"
 #include "src/devboard/utils/logging.h"
@@ -17,8 +16,6 @@
 std::string http_username;
 std::string http_password;
 bool webserver_auth = false;
-
-STOP_BUTTON_BEHAVIOR equipment_stop_behavior = STOP_BUTTON_BEHAVIOR::NOT_CONNECTED;
 
 std::string ssid;
 std::string password;

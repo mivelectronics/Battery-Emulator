@@ -62,6 +62,12 @@ bool init_contactors();
 void handle_contactors();
 
 /**
+ * @brief Keeps the contactors open until a restart, as a fault scenario does. For the caller that knows of
+ * a reason to, such as repeated watchdog resets on the S32K.
+ */
+void contactors_lockout();
+
+/**
  * @brief Handle contactors of battery 2
  *
  * @param[in] void

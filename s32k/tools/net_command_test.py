@@ -24,6 +24,7 @@ REG_CFG_MAX_CHARGE = 5052
 REG_KV_COUNT = 225
 REG_OTHER_UDS = 410
 REG_NETWORK_KEYS = 411
+REG_KV_REVISION = 413
 
 
 def check(name, ok, detail=""):
@@ -151,18 +152,19 @@ wait_for("back to the value before", lambda: rd(REG_CFG_MAX_CHARGE)[0] == was)
 # ---- settings form: be_cfg key, plain key, network key ------------------------------------------------
 form = settings_form()
 original = dict(form)
-kv_before = rd(REG_KV_COUNT)[0]
+kv_changes = rd(REG_KV_REVISION)[0]
 check("settings page reads the S32K battery type", form.get("battery") == str(rd(5040)[0]), form.get("battery"))
-form["PYLONSEND"] = "3"
+# Other values than the ones there: an earlier run may have left them stored
+form["PYLONSEND"] = "2" if form.get("PYLONSEND") == "3" else "3"
 form["HOSTNAME"] = "be-test"
-form["INVCAPACITY"] = "123"
+form["INVCAPACITY"] = "124" if form.get("INVCAPACITY") == "123" else "123"
 save_form(form)
-wait_for("plain settings reach the S32K", lambda: rd(REG_KV_COUNT)[0] >= kv_before + 2)
+wait_for("plain settings reach the S32K", lambda: ((rd(REG_KV_REVISION)[0] - kv_changes) & 0xFFFF) >= 2)
 time.sleep(1)
 kv_now = rd(REG_KV_COUNT)[0]
 check("network settings stay on the ESP32", rd(REG_NETWORK_KEYS)[0] == 0, f"{rd(REG_NETWORK_KEYS)[0]} of {kv_now} keys")
 tick = rd(222)[0]
-print(f"     longest core tick after saving {kv_now - kv_before} settings: {tick} us")
+print(f"     longest core tick after saving the form: {tick} us")
 check("flash writes do not stall the core beyond 10 ms", tick < 10000, tick)
 
 # A combination the S32K cannot run: refused, and the page shows what it runs with
@@ -184,6 +186,8 @@ client.write_register(5000, 0xA5C3, device_id=1)
 client.write_register(5044, 2, device_id=1)
 client.write_register(5001, 1, device_id=1)
 client.write_register(5000, 0, device_id=1)
+# The next form must not carry the old channel back to the S32K
+wait_for("and back", lambda: settings_form().get("BATT2COMM") != "3", 15)
 
 # Battery type from the form takes effect after the restart
 form = settings_form()

@@ -16,6 +16,7 @@
 static struct be_kv_entry __dtcm_bss_section table[KV_MAX];
 static int count;
 static uint32_t revision;
+static bool store_pending;
 static K_MUTEX_DEFINE(lock);
 
 static struct be_kv_entry *find(const char *key)
@@ -85,7 +86,6 @@ int be_kv_put(const char *key, uint8_t type, const void *value, size_t len)
 	}
 	k_mutex_lock(&lock, K_FOREVER);
 	struct be_kv_entry *e = find(key);
-	int err = 0;
 
 	if (e != NULL && e->type == type && e->len == len && memcmp(e->val, value, len) == 0) {
 		k_mutex_unlock(&lock);
@@ -104,10 +104,38 @@ int be_kv_put(const char *key, uint8_t type, const void *value, size_t len)
 	e->type = type;
 	e->len = (uint8_t)len;
 	memcpy(e->val, value, len);
-	err = store(e);
+	e->dirty = 1;
+	store_pending = true;
 	revision++;
 	k_mutex_unlock(&lock);
-	return err;
+	return 0;
+}
+
+void be_kv_store_pending(void)
+{
+	if (!store_pending) {
+		return;
+	}
+	store_pending = false;
+	for (int i = 0;; i++) {
+		struct be_kv_entry copy;
+
+		k_mutex_lock(&lock, K_FOREVER);
+		if (i >= count) {
+			k_mutex_unlock(&lock);
+			return;
+		}
+		bool dirty = table[i].dirty;
+
+		if (dirty) {
+			table[i].dirty = 0;
+			copy = table[i];
+		}
+		k_mutex_unlock(&lock);
+		if (dirty && store(&copy) != 0) {
+			printk("kv: %s not stored\n", copy.key);
+		}
+	}
 }
 
 int be_kv_put_u32(const char *key, uint8_t type, uint32_t value)

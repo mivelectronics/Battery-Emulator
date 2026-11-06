@@ -103,6 +103,14 @@ static int map_to_cfg(const char *key, uint32_t v)
 		c->max_discharge_dA = (uint16_t)v;
 	} else if (strcmp(key, "USE_SCALED_SOC") == 0) {
 		c->soc_scaling = v ? 1 : 0;
+	} else if (strcmp(key, "CNTCTRL") == 0) {
+		c->contactor_ctrl = v ? 1 : 0;
+	} else if (strcmp(key, "CNTCTRLDBL") == 0) {
+		c->contactor2_ctrl = v ? 1 : 0;
+	} else if (strcmp(key, "NCCONTACTOR") == 0) {
+		c->contactor_nc = v ? 1 : 0;
+	} else if (strcmp(key, "PRECHGMS") == 0) {
+		c->precharge_ms = (uint16_t)MIN(v, 0xFFFF);
 	} else {
 		return 0;
 	}
@@ -137,6 +145,12 @@ static void handle_kv(const struct be_set_kv *m, uint16_t value_len)
 		uint32_t v;
 
 		memcpy(&v, m->value, sizeof(v));
+		if (v != 0 && (strcmp(key, "PWMCNTCTRL") == 0 || strcmp(key, "CNTCTRLTRI") == 0)) {
+			/* A setting the outputs here cannot do must not look as if it were in force */
+			log_to_net("setting refused: no PWM hold and no third battery contactor on the S32K");
+			be_link_cmd_request_sync();
+			return;
+		}
 		if (!pending_cfg_dirty) {
 			pending_cfg = be_cfg;
 		}
@@ -300,6 +314,10 @@ static bool send_sync_cfg(int n)
 	case 8: send_sync_u32("MAXCHARGEAMP", BE_KV_UINT, c->max_charge_dA); break;
 	case 9: send_sync_u32("MAXDISCHARGEAMP", BE_KV_UINT, c->max_discharge_dA); break;
 	case 10: send_sync_u32("USE_SCALED_SOC", BE_KV_BOOL, c->soc_scaling); break;
+	case 11: send_sync_u32("CNTCTRL", BE_KV_BOOL, c->contactor_ctrl); break;
+	case 12: send_sync_u32("CNTCTRLDBL", BE_KV_BOOL, c->contactor2_ctrl); break;
+	case 13: send_sync_u32("NCCONTACTOR", BE_KV_BOOL, c->contactor_nc); break;
+	case 14: send_sync_u32("PRECHGMS", BE_KV_UINT, c->precharge_ms); break;
 	default: return false;
 	}
 	return true;

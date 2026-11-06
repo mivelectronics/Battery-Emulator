@@ -16,10 +16,13 @@
 
 #include "be_cfg.h"
 #include "be_core.h"
+#include "be_kv.h"
 #include "be_link_cmd.h"
+#include "be_wdt.h"
 #include "can_io.h"
 #include "link.h"
 #include "modbus_srv.h"
+#include "sim_battery.h"
 
 static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
 
@@ -83,11 +86,7 @@ int main(void)
 	MC_RGM->FRET = 0;
 
 	printk("\n=== BE S32K emulator (A+) on %s ===\n", CONFIG_BOARD_TARGET);
-	printk("reset flags: destructive 0x%08x functional 0x%08x\n", MC_RGM->DES, MC_RGM->FES);
-	/* The flags are write-1-to-clear and accumulate; clear them so the next start reports only
-	 * its own cause */
-	MC_RGM->DES = MC_RGM->DES;
-	MC_RGM->FES = MC_RGM->FES;
+	be_wdt_boot();
 
 	if (gpio_is_ready_dt(&led)) {
 		gpio_pin_configure_dt(&led, GPIO_OUTPUT_INACTIVE);
@@ -100,12 +99,18 @@ int main(void)
 	}
 	modbus_srv_init();
 	be_core_start();
+	be_wdt_start();
 
 	int64_t next_led = k_uptime_get(), next_stats = k_uptime_get() + 5000;
 
 	while (1) {
 		link_poll(K_MSEC(50));
 		be_link_cmd_poll();
+		be_kv_store_pending();
+		be_wdt_main_alive();
+#ifdef BE_SIM
+		sim_battery_main_poll();
+#endif
 
 		int64_t now = k_uptime_get();
 

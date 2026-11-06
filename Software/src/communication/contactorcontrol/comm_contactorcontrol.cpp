@@ -104,6 +104,14 @@ bool bms_power_is_active() {
 const char* contactors = "Contactors";
 
 bool init_contactors() {
+#ifdef CAN_VIA_LINK
+  // The S32K drives the contactors, and this board has no pins for them. Without this the state machine would
+  // report closed contactors while the S32K is only a CAN bridge. With its core running, the snapshot sets these.
+  contactor_control_enabled = false;
+  contactor_control_enabled_double_battery = false;
+  contactor_control_enabled_triple_battery = false;
+  return true;
+#endif
   // Init contactor pins
   if (contactor_control_enabled) {
     auto posPin = esp32hal->POSITIVE_CONTACTOR_PIN();
@@ -190,6 +198,10 @@ static void dbg_contactors(const char* state) {
   logging.print(millis());
   logging.print(" ms] contactors control: ");
   logging.println(state);
+}
+
+void contactors_lockout() {
+  contactorStatus = SHUTDOWN_REQUESTED;
 }
 
 // Main functions of the handle_contactors include checking if inverter allows for closing, checking battery 2, checking BMS power output, and actual contactor closing/precharge via GPIO

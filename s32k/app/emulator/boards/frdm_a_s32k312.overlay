@@ -11,7 +11,30 @@
 	chosen {
 		zephyr,settings-partition = &storage_partition;
 	};
+
+	/*
+	 * Outputs of the Battery-Emulator core on J11, indices as in hw_miv_s32k.h. Nothing else on the
+	 * board uses these pins. 3.3 V logic: a driver with a pull-down goes between them and a coil, the
+	 * pads float during a reset.
+	 */
+	zephyr,user {
+		be-gpios = <&gpioa_l 0 GPIO_ACTIVE_HIGH>,  /* 0 positive contactor, PTA0, J11-15 */
+			   <&gpioa_l 1 GPIO_ACTIVE_HIGH>,  /* 1 negative contactor, PTA1, J11-13 */
+			   <&gpioa_l 3 GPIO_ACTIVE_HIGH>,  /* 2 precharge, PTA3, J11-11 */
+			   <&gpioa_l 2 GPIO_ACTIVE_HIGH>,  /* 3 battery 2 contactor, PTA2, J11-9 */
+			   <&gpiod_h 2 GPIO_ACTIVE_HIGH>,  /* 4 BMS power, PTD18, J11-4 */
+			   <&gpioc_h 13 GPIO_ACTIVE_HIGH>; /* 5 stop button input, PTC29, J11-2 */
+	};
 };
+
+&gpioa_l {
+	status = "okay";
+};
+
+&gpiod_h {
+	status = "okay";
+};
+
 
 /* Modbus RTU server on RS485: LPUART7 (PTB14 RX, PTB15 TX), driver enable on PTB17 */
 &lpuart_7 {

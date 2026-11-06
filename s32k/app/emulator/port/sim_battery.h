@@ -20,6 +20,9 @@ void sim_battery_tick(void);
  * diagnostic tool on the bus and backs off. */
 bool sim_battery_on_frame(const struct be_can_rx *frame);
 int sim_battery_reg_read(uint16_t addr, uint16_t *value);
+/* Register 400, written: what to break, see enum sim_command */
+int sim_battery_command(uint16_t cmd);
+void sim_battery_main_poll(void);
 #else
 static inline void sim_battery_start(void) {}
 static inline void sim_battery_tick(void) {}

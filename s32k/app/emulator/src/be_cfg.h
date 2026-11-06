@@ -50,6 +50,14 @@ struct be_cfg {
 	int16_t min_percentage;  /* SOC 0.01 %, bottom of the scaled window */
 	uint16_t max_charge_dA;
 	uint16_t max_discharge_dA;
+
+	/* Contactors driven from the outputs of this board. After a reboot, the precharge time at once. */
+	uint8_t contactor_ctrl;
+	uint8_t contactor2_ctrl; /* a contactor for the second battery */
+	uint8_t contactor_nc;    /* normally closed contactors: inverted outputs. Rare */
+	uint8_t reserved2;
+	uint16_t precharge_ms;
+	uint16_t reserved3;
 };
 
 /* Active configuration (what the firmware runs with) */

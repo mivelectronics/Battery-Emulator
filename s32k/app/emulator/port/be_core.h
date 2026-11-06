@@ -16,6 +16,9 @@
 extern "C" {
 #endif
 
+/* Ticks of the core thread since the start, 0 until the first one */
+extern volatile uint32_t be_core_ticks;
+
 /* A received CAN frame on its way from the interrupt to the core */
 struct be_can_rx {
 	uint32_t id;

@@ -8,11 +8,15 @@
  */
 #include "sim_battery.h"
 
+#include <errno.h>
 #include <string.h>
+#include <zephyr/cache.h>
 #include <zephyr/kernel.h>
 
 #include "be_cfg.h"
+#include "be_gpio.h"
 #include "be_kv.h"
+#include "be_wdt.h"
 #include "can_io.h"
 #include "sim_kona_uds.inc"
 
@@ -37,6 +41,22 @@ static int64_t next_100ms, next_1s;
 static uint32_t other_uds_requests;
 static uint8_t inverter_421x[8];
 static uint32_t inverter_421x_count;
+
+/* Register 400, written */
+enum sim_command {
+	SIM_BATTERY_SILENT = 1,
+	SIM_BATTERY_BACK = 2,
+	SIM_TRACE_CLEAR = 3,
+	SIM_HANG_CORE_SPIN = 11,     /* the core thread spins, interrupts alive */
+	SIM_HANG_CORE_NO_IRQ = 12,   /* the core thread spins with the interrupts locked */
+	SIM_HANG_CORE_SLEEP = 13,    /* the core thread stops, everything else runs */
+	SIM_HANG_CORE_BUSFAULT = 14, /* the core thread reads an address with nothing behind it */
+	SIM_HANG_MAIN = 15,          /* the main thread stops */
+};
+static volatile uint16_t hang;
+static bool battery_silent;
+/* The previous run: when the hang started, to measure the time until the outputs went off */
+static __noinit uint32_t hang_started_ms;
 
 static void send8(uint8_t iface, uint32_t id, const uint8_t d[8])
 {
@@ -71,15 +91,73 @@ void sim_battery_start(void)
 	next_1s = k_uptime_get();
 }
 
+int sim_battery_command(uint16_t cmd)
+{
+	switch (cmd) {
+	case SIM_BATTERY_SILENT:
+		battery_silent = true;
+		break;
+	case SIM_BATTERY_BACK:
+		battery_silent = false;
+		break;
+	case SIM_TRACE_CLEAR:
+		be_gpio_trace_clear();
+		break;
+	case SIM_HANG_CORE_SPIN:
+	case SIM_HANG_CORE_NO_IRQ:
+	case SIM_HANG_CORE_SLEEP:
+	case SIM_HANG_CORE_BUSFAULT:
+	case SIM_HANG_MAIN:
+		hang_started_ms = k_uptime_get_32();
+		(void)sys_cache_data_flush_range(&hang_started_ms, sizeof(hang_started_ms));
+		hang = cmd;
+		break;
+	default:
+		return -EINVAL;
+	}
+	return 0;
+}
+
+void sim_battery_main_poll(void)
+{
+	if (hang == SIM_HANG_MAIN) {
+		k_sleep(K_FOREVER);
+	}
+}
+
+static void hang_in_core(void)
+{
+	switch (hang) {
+	case SIM_HANG_CORE_SPIN:
+		while (1) {
+		}
+	case SIM_HANG_CORE_NO_IRQ:
+		(void)irq_lock();
+		while (1) {
+		}
+	case SIM_HANG_CORE_SLEEP:
+		k_sleep(K_FOREVER);
+		break;
+	case SIM_HANG_CORE_BUSFAULT:
+		(void)*(volatile uint32_t *)0xF0000000U;
+		break;
+	default:
+		break;
+	}
+}
+
 void sim_battery_tick(void)
 {
 	int64_t now = k_uptime_get();
 
+	hang_in_core();
 	if (now >= next_100ms) {
 		next_100ms += 100;
-		send_battery_frames(be_cfg.battery_iface);
-		if (be_cfg.battery2_type != 0) {
-			send_battery_frames(be_cfg.battery2_iface);
+		if (!battery_silent) {
+			send_battery_frames(be_cfg.battery_iface);
+			if (be_cfg.battery2_type != 0) {
+				send_battery_frames(be_cfg.battery2_iface);
+			}
 		}
 	}
 	if (now >= next_1s) {
@@ -93,7 +171,7 @@ void sim_battery_tick(void)
 	for (uint8_t i = 0; i < BE_NUM_CAN; i++) {
 		struct sim_uds_state *u = &uds[i];
 
-		if (u->pending != NULL && u->next != 0xFF && now >= u->next_cf) {
+		if (!battery_silent && u->pending != NULL && u->next != 0xFF && now >= u->next_cf) {
 			u->next_cf = now + 10;
 			send8(i, 0x7EC, u->pending->frames[u->next]);
 			if (++u->next >= u->pending->n_frames) {
@@ -123,6 +201,9 @@ bool sim_battery_on_frame(const struct be_can_rx *f)
 	}
 	struct sim_uds_state *u = &uds[f->iface];
 
+	if (battery_silent) {
+		return false;
+	}
 	if (f->data[0] == 0x03 && f->data[1] == 0x22) {
 		uint16_t pid = (f->data[2] << 8) | f->data[3];
 
@@ -168,6 +249,26 @@ int sim_battery_reg_read(uint16_t addr, uint16_t *v)
 			}
 		}
 		*v = n;
+	} else if (addr == 412) {
+		/* The previous run: ms from the start of the hang until the outputs went off */
+		uint32_t off = be_wdt_last_off_ms();
+
+		*v = off > hang_started_ms ? (uint16_t)MIN(off - hang_started_ms, 0xFFFF) : 0;
+	} else if (addr == 413) {
+		*v = (uint16_t)be_kv_revision();
+	} else if (addr == 420) {
+		*v = be_gpio_trace_count();
+	} else if (addr >= 421 && addr < 421 + 3 * 24) {
+		/* Changes of the outputs: pin | level << 8, time ms high, low */
+		uint8_t pin = 0, level = 0;
+		uint32_t ms = 0;
+		uint16_t off = addr - 421;
+
+		*v = 0xFFFF;
+		if (be_gpio_trace_at(off / 3, &pin, &level, &ms)) {
+			*v = off % 3 == 0 ? (uint16_t)(pin | (level << 8))
+					  : (uint16_t)(off % 3 == 1 ? ms >> 16 : ms);
+		}
 	} else {
 		*v = 0;
 	}

@@ -1961,6 +1961,11 @@ static bool render_live(CheckedHtml& content) {
           } else {
             content += "<span style='color: red;'>OFF</span>";
           }
+#ifdef CAN_VIA_LINK
+        } else if (be_remote_active()) {
+          content += datalayer.system.status.contactors_battery2_engaged ? "<span style='color: green;'>ON</span>"
+                                                                         : "<span style='color: red;'>OFF</span>";
+#endif
         } else if (
             esp32hal->SECOND_BATTERY_CONTACTORS_PIN() !=
             GPIO_NUM_NC) {  // No PWM_CONTACTOR_CONTROL , we can read the pin and see feedback. Helpful if channel overloaded

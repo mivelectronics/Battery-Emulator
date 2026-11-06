@@ -17,6 +17,8 @@
 
 #include "be_cfg.h"
 #include "be_core.h"
+#include "be_gpio.h"
+#include "be_wdt.h"
 #include "can_io.h"
 #include "sim_battery.h"
 #include "link.h"
@@ -74,6 +76,14 @@ static int read_sys(uint16_t r, uint16_t *v)
 	case 7: *v = unlocked() ? 1 : 0; break;
 	case 8: *v = (uint16_t)last_cmd_result; break;
 	case 9: *v = (unlocked() && memcmp(&stage, &be_cfg, sizeof(stage)) != 0) ? 1 : 0; break; /* unsaved edits */
+	case 10: *v = (uint16_t)be_wdt_reset_cause(); break;
+	case 11: *v = (uint16_t)be_wdt_resets_in_row(); break;
+	case 12: *v = be_gpio_outputs_after_reset(); break;
+	case 13: *v = be_wdt_running() ? 1 : 0; break;
+	case 14: *v = hi16(be_wdt_flags_des()); break;
+	case 15: *v = lo16(be_wdt_flags_des()); break;
+	case 16: *v = hi16(be_wdt_flags_fes()); break;
+	case 17: *v = lo16(be_wdt_flags_fes()); break;
 	default: *v = 0; break; /* reserved: read as 0 */
 	}
 	return 0;
@@ -138,6 +148,10 @@ static uint16_t *cfg_reg16(struct be_cfg *c, uint16_t off, bool *is_u8)
 	case 51: return (uint16_t *)&c->min_percentage;
 	case 52: return &c->max_charge_dA;
 	case 53: return &c->max_discharge_dA;
+	case 54: *is_u8 = true; tmp8 = c->contactor_ctrl; return &tmp8;
+	case 55: *is_u8 = true; tmp8 = c->contactor2_ctrl; return &tmp8;
+	case 56: *is_u8 = true; tmp8 = c->contactor_nc; return &tmp8;
+	case 57: return &c->precharge_ms;
 	default: return NULL;
 	}
 }
@@ -240,6 +254,11 @@ static int holding_reg_wr(uint16_t addr, uint16_t reg)
 		}
 		return 0;
 	}
+#ifdef BE_SIM
+	if (addr == 400) {
+		return sim_battery_command(reg);
+	}
+#endif
 	if (!unlocked()) {
 		return -EACCES;
 	}
@@ -278,6 +297,12 @@ static int holding_reg_wr(uint16_t addr, uint16_t reg)
 		stage.inverter_iface = (uint8_t)reg;
 	} else if (off == 46) {
 		stage.soc_scaling = (uint8_t)reg;
+	} else if (off == 54) {
+		stage.contactor_ctrl = (uint8_t)reg;
+	} else if (off == 55) {
+		stage.contactor2_ctrl = (uint8_t)reg;
+	} else if (off == 56) {
+		stage.contactor_nc = (uint8_t)reg;
 	}
 	return 0;
 }

@@ -27,6 +27,7 @@ struct be_kv_entry {
 	uint8_t type;
 	uint8_t len;
 	uint8_t val[BE_KV_VAL_LEN]; /* numbers: uint32_t little endian */
+	uint8_t dirty;              /* not in NVS yet */
 };
 
 bool be_kv_has(const char *key);
@@ -34,9 +35,14 @@ bool be_kv_get_u32(const char *key, uint32_t *value);
 /* Copies a string value with its terminator, returns its length, or -1 if there is none. */
 int be_kv_get_str(const char *key, char *out, size_t cap);
 
-/* Stores in RAM and NVS. The NVS write only if the value changed. */
+/*
+ * Stores in RAM, and in NVS at the next be_kv_store_pending(), only if the value changed. The core
+ * thread calls this too: a flash erase takes tens of ms and must not stall it.
+ */
 int be_kv_put(const char *key, uint8_t type, const void *value, size_t len);
 int be_kv_put_u32(const char *key, uint8_t type, uint32_t value);
+/* From the main thread. Holds no lock during the flash write, so a be_kv_put() never waits for one. */
+void be_kv_store_pending(void);
 int be_kv_remove(const char *key);
 void be_kv_clear(void);
 

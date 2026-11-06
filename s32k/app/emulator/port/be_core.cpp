@@ -14,6 +14,7 @@
 #include "src/battery/BATTERIES.h"
 #include "src/communication/link/be_snapshot.h"
 #include "src/communication/contactorcontrol/comm_contactorcontrol.h"
+#include "src/communication/equipmentstopbutton/comm_equipmentstopbutton.h"
 #include "src/charger/CHARGERS.h"
 #include "src/communication/Transmitter.h"
 #include "src/communication/can/comm_can.h"
@@ -37,6 +38,8 @@
 
 extern "C" {
 #include "be_cfg.h"
+#include "be_gpio.h"
+#include "be_wdt.h"
 int printk(const char* fmt, ...);
 int link_send(uint8_t type, const void* payload, uint16_t len);
 bool link_peer_alive(void);
@@ -93,6 +96,60 @@ static void apply_be_cfg() {
   datalayer.battery_settings.max_user_set_charge_dA = be_cfg.max_charge_dA;
   datalayer.battery_settings.max_user_set_discharge_dA = be_cfg.max_discharge_dA;
   datalayer.battery_settings.soc_scaling_active = be_cfg.soc_scaling != 0;
+  precharge_time_ms = be_cfg.precharge_ms;
+}
+
+// What decides which pins exist and how they are driven. Read once at the start: the pins are set up from
+// these, so that a change takes effect only after a restart. Turning contactor control off while the
+// contactors are closed would leave them closed with nothing watching them.
+struct OutputSetup {
+  bool contactors, contactors2, inverted, periodic_bms_reset, remote_bms_reset;
+  STOP_BUTTON_BEHAVIOR stop_button;
+};
+
+static OutputSetup output_setup() {
+  return {contactor_control_enabled, contactor_control_enabled_double_battery, contactor_control_inverted_logic,
+          periodic_bms_reset,        remote_bms_reset,                         equipment_stop_behavior};
+}
+
+static void apply_output_setup(const OutputSetup& o) {
+  contactor_control_enabled = o.contactors;
+  contactor_control_enabled_double_battery = o.contactors2;
+  contactor_control_enabled_triple_battery = false;  // no third battery on this hardware
+  contactor_control_inverted_logic = o.inverted;
+  pwm_contactor_control = false;  // not ported, refused in be_link_cmd.c
+  periodic_bms_reset = o.periodic_bms_reset;
+  remote_bms_reset = o.remote_bms_reset;
+  equipment_stop_behavior = o.stop_button;
+}
+
+// What check_reset_reason() does on the ESP32
+static void report_reset_cause() {
+  const int cause = be_wdt_reset_cause();
+
+  switch (cause) {
+    case BE_RESET_POWER:
+      set_event(EVENT_RESET_POWERON, cause);
+      break;
+    case BE_RESET_REQUESTED:
+      set_event(EVENT_RESET_SW, cause);
+      break;
+    case BE_RESET_WDT_FIRST:
+      set_event(EVENT_RESET_TASK_WDT, cause);
+      break;
+    case BE_RESET_FATAL:
+      set_event(EVENT_RESET_PANIC, cause);
+      break;
+    case BE_RESET_WDT_HW:
+      set_event(EVENT_RESET_INT_WDT, cause);
+      break;
+    case BE_RESET_EXTERNAL:
+      set_event(EVENT_RESET_EXT, cause);
+      break;
+    default:
+      set_event(EVENT_RESET_UNKNOWN, cause);
+      break;
+  }
 }
 
 static volatile bool reload_requested = false;
@@ -103,10 +160,22 @@ void be_core_request_reload(void) {
 void be_core_setup(void) {
   init_hal();
   init_events();
+  report_reset_cause();
   init_stored_settings();
   apply_be_cfg();
 
+  OutputSetup outputs = output_setup();
+  outputs.contactors = be_cfg.contactor_ctrl != 0;
+  outputs.contactors2 = be_cfg.contactor2_ctrl != 0;
+  outputs.inverted = be_cfg.contactor_nc != 0;
+  apply_output_setup(outputs);
+
   init_contactors();
+  if (be_wdt_contactors_locked_out()) {
+    printk("contactors stay open: %u watchdog resets in a row\n", be_wdt_resets_in_row());
+    contactors_lockout();
+  }
+  init_equipment_stop_button();
   release_pins_across_reset();
   init_precharge_control();
   init_rs485();
@@ -235,7 +304,9 @@ static void handle_commands() {
 
   if (reload_requested) {
     reload_requested = false;
+    const OutputSetup outputs = output_setup();
     init_stored_settings();
+    apply_output_setup(outputs);
     apply_be_cfg();
   }
 }
@@ -261,6 +332,7 @@ void be_core_tick(void) {
       set_event(EVENT_TASK_OVERRUN, (currentMillis - previousMillis10ms));
     }
     previousMillis10ms = currentMillis;
+    monitor_equipment_stop_button();
     handle_contactors();
     if (precharge_control_enabled) {
       handle_precharge_control(currentMillis);
@@ -302,6 +374,11 @@ void be_core_tick(void) {
 
   if (snapshot_sending) {
     snapshot_sending = !be_snapshot_send_step(send_snapshot);
+  }
+
+  // Batteries with contactors inside, like the Kona, close them on CAN frames that depend on this
+  if (be_wdt_contactors_locked_out()) {
+    datalayer.system.status.inverter_allows_contactor_closing = false;
   }
 
   for (auto& transmitter : transmitters) {
@@ -391,6 +468,10 @@ static uint16_t reg_system(uint16_t r) {
       return be_core_stack_free();
     case 25:
       return static_cast<uint16_t>(be_kv_count());
+    case 26:
+      return be_gpio_levels();
+    case 27:
+      return be_wdt_contactors_locked_out();
     default:
       return 0;
   }
