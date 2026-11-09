@@ -171,8 +171,11 @@ function pack(j,p,box,socId,barId){
 }
 
 function render(j){
+  // The firmware answers {"v":1,"error":…} when something does not fit: say so, it is not a lost connection
+  if(j.error){document.body.className="down";$("banner").textContent="Status not available: "+j.error;return}
   last=j;
   const st=$("st");st.textContent=j.status;
+  if(j.ev_count>j.ev.length)j.ev.push({level:"INFO",name:"… "+(j.ev_count-j.ev.length)+" more in Events",data:0});
   st.className="pill "+(j.status==="FAULT"?"err":j.status==="ACTIVE"?"ok":"warn");
   $("src").textContent=(j.src==="s32k"?"core on S32K":"local core")+" · ESP32 up "+dur(j.esp_uptime_s)+" · heap "+Math.round(j.esp_heap_B/1024)+" kB (min "+Math.round(j.esp_heap_min_B/1024)+")";
   const stale=j.src==="s32k"&&!j.link_ok;
@@ -318,7 +321,18 @@ $("limsave").onclick=async()=>{
   }catch(e){$("limmsg").textContent="Not saved: "+e.message}
 };
 
-let upForm=null;
+let upForm=null,upChecks={};
+// The checks the upstream page runs before it posts the form, taken from its own script and run against
+// the copy of the form here: validateBatteryInterfaces (one CAN interface per battery) and confirmBmsRestart
+function upstreamChecks(doc,root){
+  const src=[...doc.querySelectorAll("script")].map(s=>s.textContent).join("\n");
+  const grab=name=>{const i=src.indexOf("function "+name+"(");if(i<0)return"";let k=src.indexOf("{",i),d=0;
+    for(;k<src.length;k++){if(src[k]==="{")d++;else if(src[k]==="}"&&--d===0)return src.slice(i,k+1)}return""};
+  const code=grab("validateBatteryInterfaces")+"\n"+grab("confirmBmsRestart");
+  const fakeDoc={querySelector:s=>root.querySelector(s),querySelectorAll:s=>root.querySelectorAll(s),getElementById:id=>root.getElementById(id)};
+  try{return new Function("document",code+"\nreturn{v:typeof validateBatteryInterfaces==='function'?validateBatteryInterfaces:null,c:typeof confirmBmsRestart==='function'?confirmBmsRestart:null}")(fakeDoc)}
+  catch(e){return{}}
+}
 async function loadForm(){
   const host=$("sethost");
   try{
@@ -352,6 +366,7 @@ async function loadForm(){
     upForm.querySelectorAll("select[name=battery],select[name=inverter]").forEach(s=>s.addEventListener("change",syncShunt));
     syncShunt();
     upForm.addEventListener("submit",e=>{e.preventDefault();saveForm()});
+    upChecks=upstreamChecks(doc,sh);
     $("setsave").disabled=false;
     host.querySelector("small")?.remove();
   }catch(e){host.innerHTML="<small>Could not load the settings form: "+esc(e.message)+"</small>"}
@@ -359,6 +374,8 @@ async function loadForm(){
 
 async function saveForm(){
   if(!upForm)return;
+  if(upChecks.v&&!upChecks.v())return;
+  if(upChecks.c)upChecks.c();
   $("setsave").disabled=true;
   const msg=$("setmsg");
   try{

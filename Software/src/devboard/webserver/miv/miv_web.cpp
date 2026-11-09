@@ -1,6 +1,13 @@
 #include "miv_web.h"
 
+#ifndef CAN_VIA_LINK
+// Only the boards with the S32K link (miv_esp32eth_330) carry these pages: the upstream boards keep their
+// RAM and flash.
+void init_miv_web(AsyncWebServer&) {}
+#else
+
 #include <Arduino.h>
+#include <memory>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <stdarg.h>
@@ -201,17 +208,15 @@ static void write_pack(JsonOut& j, const char* prefix, int pack) {
   }
 }
 
+// Measured: about 2.3 kB without events, 80 bytes per event: 16 of them stay well inside status_buf
+static constexpr int STATUS_MAX_EVENTS = 16;
+
 static void write_status(JsonOut& j) {
   const auto& st = datalayer.system.status;
   const auto& info = datalayer.system.info;
   const auto& ag = datalayer.aggregate;
-#ifdef CAN_VIA_LINK
   const bool remote = be_remote_active();
   const uint32_t age = be_remote_snapshot_age_ms();
-#else
-  const bool remote = false;
-  const uint32_t age = UINT32_MAX;
-#endif
 
   j.open('{');
   j.num("v", 1);
@@ -270,19 +275,30 @@ static void write_status(JsonOut& j) {
   static const char* const level_names[] = {"INFO", "DEBUG", "WARNING", "UPDATE", "ERROR"};
   const unsigned level = (unsigned)get_event_level();
   j.str("ev_level", level < 5 ? level_names[level] : "UNKNOWN");
+  // The status carries a few active events, errors and warnings first, so that it always fits its buffer;
+  // the events view reads the whole log from /miv/api/events
   j.key("ev");
   j.open('[');
-  for (int i = 0; i < EVENT_NOF_EVENTS; i++) {
-    const EVENTS_STRUCT_TYPE* e = get_event_pointer((EVENTS_ENUM_TYPE)i);
-    if (e->state != EVENT_STATE_ACTIVE && e->state != EVENT_STATE_ACTIVE_LATCHED) {
-      continue;
+  int shown = 0;
+  for (int pass = 0; pass < 2; pass++) {
+    for (int i = 0; i < EVENT_NOF_EVENTS && shown < STATUS_MAX_EVENTS; i++) {
+      const EVENTS_STRUCT_TYPE* e = get_event_pointer((EVENTS_ENUM_TYPE)i);
+      if (e->state != EVENT_STATE_ACTIVE && e->state != EVENT_STATE_ACTIVE_LATCHED) {
+        continue;
+      }
+      const char* lv = get_event_level_string((EVENTS_ENUM_TYPE)i);
+      const bool serious = strcmp(lv, "ERROR") == 0 || strcmp(lv, "WARNING") == 0;
+      if (serious != (pass == 0)) {
+        continue;
+      }
+      j.item();
+      j.open('{');
+      j.str("name", get_event_enum_string((EVENTS_ENUM_TYPE)i));
+      j.str("level", lv);
+      j.num("data", e->data);
+      j.close('}');
+      shown++;
     }
-    j.item();
-    j.open('{');
-    j.str("name", get_event_enum_string((EVENTS_ENUM_TYPE)i));
-    j.str("level", get_event_level_string((EVENTS_ENUM_TYPE)i));
-    j.num("data", e->data);
-    j.close('}');
   }
   j.close(']');
 
@@ -291,12 +307,10 @@ static void write_status(JsonOut& j) {
   bool have_k = false;
   uint32_t rev = 0;
   bool have_rev = false;
-#ifdef CAN_VIA_LINK
   if (remote) {
     have_k = be_remote_s32k_status(&k);
     have_rev = be_remote_settings_revision(&rev);
   }
-#endif
   if (have_rev) {
     j.unum("settings_rev", rev);
   } else {
@@ -353,9 +367,7 @@ static bool status_valid = false;
 
 static void build_status() {
   for (int tries = 0; tries < 3; tries++) {
-#ifdef CAN_VIA_LINK
     const uint32_t seq = be_remote_apply_seq();
-#endif
     JsonOut j(status_buf, sizeof(status_buf));
     write_status(j);
     if (j.overflow()) {
@@ -363,14 +375,10 @@ static void build_status() {
                (unsigned)sizeof(status_buf));
       break;
     }
-#ifdef CAN_VIA_LINK
     // A snapshot part arrived meanwhile: values from two of them could be mixed
     if ((seq & 1u) == 0 && seq == be_remote_apply_seq()) {
       break;
     }
-#else
-    break;
-#endif
   }
   status_built_ms = millis();
   status_valid = true;
@@ -403,8 +411,8 @@ static void handle_cells(AsyncWebServerRequest* request) {
     request->send(400, "text/plain", "b must be 1, 2 or 3");
     return;
   }
-  // 192 cells at most: "4123," is 5 bytes, plus the balancing flags
-  static char buf[192 * 6 + 192 * 4 + 128];
+  // "4123," for every cell, "123," for every balancing one, and the frame
+  static char buf[MAX_AMOUNT_CELLS * 6 + MAX_AMOUNT_CELLS * 4 + 128];
   if (xSemaphoreTake(status_lock, pdMS_TO_TICKS(500)) != pdTRUE) {
     request->send(503, "text/plain", "busy");
     return;
@@ -439,6 +447,11 @@ static void handle_cells(AsyncWebServerRequest* request) {
     j.close(']');
   }
   j.close('}');
+  if (j.overflow()) {
+    xSemaphoreGive(status_lock);
+    request->send(500, "text/plain", "cell list does not fit");
+    return;
+  }
   AsyncWebServerResponse* r = request->beginResponse(200, "application/json", buf);  // copied
   xSemaphoreGive(status_lock);
   r->addHeader("Cache-Control", "no-store");
@@ -478,7 +491,6 @@ static void write_settings(JsonOut& j) {
   const auto& bs = datalayer.battery_settings;
   j.open('{');
   j.num("v", 1);
-#ifdef CAN_VIA_LINK
   const bool remote = be_remote_active();
   uint32_t rev = 0;
   if (remote && be_remote_settings_revision(&rev)) {
@@ -486,10 +498,6 @@ static void write_settings(JsonOut& j) {
   } else {
     j.null("settings_rev");
   }
-#else
-  const bool remote = false;
-  j.null("settings_rev");
-#endif
   j.boolean("remote", remote);
   for (const SetDef& d : set_defs) {
     switch (d.kind) {
@@ -538,63 +546,81 @@ static bool parse_bool(const String& v) {
 // for settings_rev to move and reads GET again.
 static void handle_settings_post(AsyncWebServerRequest* request) {
   static char buf[512];
-  JsonOut j(buf, sizeof(buf));
+  constexpr size_t N = sizeof(set_defs) / sizeof(set_defs[0]);
+  // First every field is read and checked, then saved: a bad value saves nothing
+  bool given[N] = {};
+  uint32_t uval[N] = {};
+  float fval[N] = {};
+  for (size_t k = 0; k < N; k++) {
+    const SetDef& d = set_defs[k];
+    if (!request->hasParam(d.name, true)) {
+      continue;
+    }
+    const String v = request->getParam(d.name, true)->value();
+    const float f = v.toFloat();
+    const char* bad = nullptr;
+    switch (d.kind) {
+      case SetKind::UInt:
+        bad = v.toInt() < 0 ? "must not be negative" : nullptr;
+        uval[k] = (uint32_t)v.toInt();
+        break;
+      case SetKind::Bool:
+      case SetKind::Scaling:
+        uval[k] = parse_bool(v) ? 1 : 0;
+        break;
+      case SetKind::SocMax:
+        bad = (f < 0 || f > 100) ? "must be 0..100" : nullptr;
+        break;
+      case SetKind::SocMin:
+        bad = (f < -10 || f > 100) ? "must be -10..100" : nullptr;
+        break;
+      case SetKind::ChargeA:
+      case SetKind::DischargeA:
+        bad = (f < 0 || f > 6000) ? "must be 0..6000" : nullptr;
+        break;
+    }
+    if (bad) {
+      request->send(400, "text/plain", String(d.name) + " " + bad);
+      return;
+    }
+    given[k] = true;
+    fval[k] = f;
+  }
   bool live = false;
   int saved = 0;
   {
     BatteryEmulatorSettingsStore store;
     auto& bs = datalayer.battery_settings;
-    for (const SetDef& d : set_defs) {
-      if (!request->hasParam(d.name, true)) {
+    for (size_t k = 0; k < N; k++) {
+      if (!given[k]) {
         continue;
       }
-      const String v = request->getParam(d.name, true)->value();
-      const float f = v.toFloat();
+      const SetDef& d = set_defs[k];
       switch (d.kind) {
         case SetKind::UInt:
-          if (v.toInt() < 0) {
-            request->send(400, "text/plain", String(d.name) + " must not be negative");
-            return;
-          }
-          store.saveUInt(d.key, (uint32_t)v.toInt());
+          store.saveUInt(d.key, uval[k]);
           break;
         case SetKind::Bool:
-          store.saveBool(d.key, parse_bool(v));
+          store.saveBool(d.key, uval[k] != 0);
           break;
         case SetKind::SocMax:
-          if (f < 0 || f > 100) {
-            request->send(400, "text/plain", "soc_max_pct must be 0..100");
-            return;
-          }
-          bs.max_percentage = static_cast<uint16_t>(f * 100);
+          bs.max_percentage = static_cast<uint16_t>(fval[k] * 100);
           live = true;
           break;
         case SetKind::SocMin:
-          if (f < -10 || f > 100) {
-            request->send(400, "text/plain", "soc_min_pct must be -10..100");
-            return;
-          }
-          bs.min_percentage = static_cast<int16_t>(f * 100);
+          bs.min_percentage = static_cast<int16_t>(fval[k] * 100);
           live = true;
           break;
         case SetKind::ChargeA:
-          if (f < 0 || f > 6000) {
-            request->send(400, "text/plain", "max_charge_A out of range");
-            return;
-          }
-          bs.max_user_set_charge_dA = static_cast<uint16_t>(f * 10);
+          bs.max_user_set_charge_dA = static_cast<uint16_t>(fval[k] * 10);
           live = true;
           break;
         case SetKind::DischargeA:
-          if (f < 0 || f > 6000) {
-            request->send(400, "text/plain", "max_discharge_A out of range");
-            return;
-          }
-          bs.max_user_set_discharge_dA = static_cast<uint16_t>(f * 10);
+          bs.max_user_set_discharge_dA = static_cast<uint16_t>(fval[k] * 10);
           live = true;
           break;
         case SetKind::Scaling:
-          bs.soc_scaling_active = parse_bool(v);
+          bs.soc_scaling_active = uval[k] != 0;
           live = true;
           break;
       }
@@ -604,19 +630,16 @@ static void handle_settings_post(AsyncWebServerRequest* request) {
   if (live) {
     store_settings();
   }
+  JsonOut j(buf, sizeof(buf));
   j.open('{');
   j.num("v", 1);
   j.num("saved", saved);
-#ifdef CAN_VIA_LINK
   uint32_t rev = 0;
   if (be_remote_active() && be_remote_settings_revision(&rev)) {
     j.unum("settings_rev", rev);  // wait for a different one
   } else {
     j.null("settings_rev");
   }
-#else
-  j.null("settings_rev");
-#endif
   j.close('}');
   send_json(request, 202, buf);
 }
@@ -625,24 +648,20 @@ static void handle_settings_post(AsyncWebServerRequest* request) {
    With the core on the S32K its active events are mirrored into this list (be_snapshot.cpp), so the list is
    one; their count and time are those of the mirror on this chip. */
 static int write_events(JsonOut& j) {
-  struct Item {
-    uint8_t id;
-    uint64_t ts;
-  };
-  static Item items[EVENT_NOF_EVENTS];
+  static uint8_t order[EVENT_NOF_EVENTS];  // ids, newest first
+  const auto ts = [](uint8_t id) { return get_event_pointer((EVENTS_ENUM_TYPE)id)->timestamp; };
   int n = 0;
   for (int i = 0; i < EVENT_NOF_EVENTS; i++) {
-    const EVENTS_STRUCT_TYPE* e = get_event_pointer((EVENTS_ENUM_TYPE)i);
-    if (e->occurences > 0) {
-      items[n++] = {(uint8_t)i, e->timestamp};
+    if (get_event_pointer((EVENTS_ENUM_TYPE)i)->occurences > 0) {
+      order[n++] = (uint8_t)i;
     }
   }
-  // newest first; few items, so a plain insertion sort
+  // few of them, so a plain insertion sort
   for (int a = 1; a < n; a++) {
-    for (int b = a; b > 0 && items[b].ts > items[b - 1].ts; b--) {
-      const Item t = items[b];
-      items[b] = items[b - 1];
-      items[b - 1] = t;
+    for (int b = a; b > 0 && ts(order[b]) > ts(order[b - 1]); b--) {
+      const uint8_t t = order[b];
+      order[b] = order[b - 1];
+      order[b - 1] = t;
     }
   }
   static const char* const state_names[] = {"pending", "inactive", "active", "latched"};
@@ -653,7 +672,7 @@ static int write_events(JsonOut& j) {
   j.key("ev");
   j.open('[');
   for (int k = 0; k < n; k++) {
-    const EVENTS_ENUM_TYPE id = (EVENTS_ENUM_TYPE)items[k].id;
+    const EVENTS_ENUM_TYPE id = (EVENTS_ENUM_TYPE)order[k];
     const EVENTS_STRUCT_TYPE* e = get_event_pointer(id);
     j.item();
     j.open('{');
@@ -672,21 +691,28 @@ static int write_events(JsonOut& j) {
 }
 
 static void handle_events(AsyncWebServerRequest* request) {
-  // The messages make it a few kB: on the heap only while it is sent
+  // The messages make it a few kB: built on the heap and sent from there, freed when the response is gone
   for (size_t cap = 8192; cap <= 32768; cap *= 2) {
-    char* buf = (char*)malloc(cap);
-    if (buf == nullptr) {
+    std::shared_ptr<char> buf((char*)malloc(cap), free);
+    if (!buf) {
       request->send(503, "text/plain", "no memory");
       return;
     }
-    JsonOut j(buf, cap);
+    JsonOut j(buf.get(), cap);
     write_events(j);
-    if (!j.overflow()) {
-      send_json(request, 200, buf);
-      free(buf);
-      return;
+    if (j.overflow()) {
+      continue;
     }
-    free(buf);
+    const size_t len = j.len();
+    AsyncWebServerResponse* r = request->beginResponse(
+        "application/json", len, [buf, len](uint8_t* out, size_t max, size_t index) -> size_t {
+          const size_t n = (len - index) < max ? (len - index) : max;
+          memcpy(out, buf.get() + index, n);
+          return n;
+        });
+    r->addHeader("Cache-Control", "no-store");
+    request->send(r);
+    return;
   }
   request->send(500, "text/plain", "event list too long");
 }
@@ -694,11 +720,9 @@ static void handle_events(AsyncWebServerRequest* request) {
 // The same as the upstream /clearevents, which answers with a page instead
 static void handle_events_clear(AsyncWebServerRequest* request) {
   reset_all_events();
-#ifdef CAN_VIA_LINK
   if (be_remote_active()) {
     be_remote_cmd(BE_CMD_CLEAR_EVENTS, 0, 0);
   }
-#endif
   send_json(request, 200, "{\"v\":1,\"cleared\":true}");
 }
 
@@ -725,3 +749,5 @@ void init_miv_web(AsyncWebServer& server) {
   // from the path (/miv/, /miv/settings, /miv/cells, /miv/events, /miv/update)
   server.on("/miv", HTTP_GET, handle_page);
 }
+
+#endif  // CAN_VIA_LINK
