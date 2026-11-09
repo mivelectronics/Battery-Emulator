@@ -5,22 +5,25 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Battery Emulator</title>
 <style>
-:root{--bg:#f4f5f7;--card:#fff;--fg:#1d2330;--mut:#6b7280;--line:#e3e6ea;--ok:#1a8f4c;--warn:#b7791f;--err:#c53030;--info:#2b6cb0;--soc:#2b6cb0;--v:#7b3fb3;--a:#c05621}
-@media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d2128;--fg:#e6e8eb;--mut:#9aa1ab;--line:#2c313a;--soc:#63a4ff;--v:#b98cf0;--a:#f0a058}}
+:root{--bg:#f4f5f7;--card:#fff;--fg:#1d2330;--mut:#6b7280;--line:#e3e6ea;--ok:#1a8f4c;--warn:#b7791f;--err:#c53030;--info:#2b6cb0;--soc:#2b6cb0;--v:#7b3fb3;--a:#c05621;--btn:#2b6cb0}
+@media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d2128;--fg:#e6e8eb;--mut:#9aa1ab;--line:#2c313a;--soc:#63a4ff;--v:#b98cf0;--a:#f0a058;--btn:#3b78c4}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line)}
 header h1{font-size:17px;margin:0}
-header nav{margin-left:auto;display:flex;flex-wrap:wrap;gap:10px}
+nav{display:flex;flex-wrap:wrap;gap:4px;padding:6px 12px;background:var(--card);border-bottom:1px solid var(--line)}
+nav a{padding:5px 12px;border-radius:6px;color:var(--fg)}
+nav a.on{background:var(--btn);color:#fff}
+nav a.x{margin-left:auto;color:var(--mut)}
 a{color:var(--info);text-decoration:none}
 .pill{padding:2px 10px;border-radius:12px;font-weight:600;color:#fff;background:var(--mut)}
 .pill.ok{background:var(--ok)}.pill.err{background:var(--err)}.pill.warn{background:var(--warn)}
 .banner{display:none;padding:8px 16px;background:var(--mut);color:#fff;font-weight:600}
 body.stale .banner,body.down .banner{display:block}
 body.down .banner{background:var(--err)}
-body.stale main,body.down main{opacity:.45;filter:grayscale(1)}
+body.stale .live,body.down .live{opacity:.45;filter:grayscale(1)}
 main{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;padding:12px 16px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px;min-width:0}
 .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin:0 0 8px}
 .wide{grid-column:1/-1}
 .big{font-size:34px;font-weight:700;line-height:1.1}
@@ -32,17 +35,31 @@ main{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:
 .bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:6px 0 8px}
 .bar i{display:block;height:100%;background:var(--soc);width:0}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
-th,td{padding:3px 4px;text-align:right;border-bottom:1px dashed var(--line)}
+th,td{padding:3px 4px;text-align:right;border-bottom:1px dashed var(--line);vertical-align:top}
 th:first-child,td:first-child{text-align:left}
 th{color:var(--mut);font-weight:500}
 .ev{display:flex;gap:8px;align-items:baseline;padding:3px 0}
-.lv{font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;color:#fff;background:var(--info)}
-.lv.WARNING{background:var(--warn)}.lv.ERROR{background:var(--err)}.lv.DEBUG{background:var(--mut)}
+.lv{font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;color:#fff;background:var(--info);white-space:nowrap}
+.lv.WARNING{background:var(--warn)}.lv.ERROR{background:var(--err)}.lv.DEBUG,.lv.UPDATE{background:var(--mut)}
 canvas{width:100%;height:240px;display:block}
 .legend{display:flex;gap:14px;color:var(--mut);font-size:12px;margin-top:4px}
 .legend b{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
-.hide{display:none}
-small{color:var(--mut)}
+.hide{display:none!important}
+small,.mut{color:var(--mut)}
+button{background:var(--btn);color:#fff;border:0;border-radius:6px;padding:7px 14px;font:inherit;cursor:pointer}
+button.sec{background:var(--line);color:var(--fg)}button.red{background:var(--err)}
+button:disabled{opacity:.5;cursor:default}
+input,select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:4px 6px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(58px,1fr));gap:4px}
+.cell{border-radius:5px;padding:3px 2px;text-align:center;font-size:12px;font-variant-numeric:tabular-nums;background:var(--bg);border:2px solid transparent}
+.cell b{display:block;font-size:10px;color:var(--mut);font-weight:500}
+.cell.mx{border-color:var(--err)}.cell.mn{border-color:var(--info)}.cell.bal{outline:2px dashed var(--warn)}
+.form2{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;align-items:center;max-width:460px}
+.note{padding:8px 10px;border-radius:6px;background:var(--bg);border-left:4px solid var(--warn);margin:8px 0}
+.note.ok{border-color:var(--ok)}.note.err{border-color:var(--err)}
+.erow{padding:7px 0;border-bottom:1px dashed var(--line)}.erow:last-child{border:0}.erow .h{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline}.erow .h b{overflow-wrap:anywhere}.erow .m{margin:2px 0;overflow-wrap:anywhere}
+.prog{height:14px;background:var(--line);border-radius:7px;overflow:hidden;margin:8px 0}
+.prog i{display:block;height:100%;width:0;background:var(--ok)}
 </style>
 </head>
 <body>
@@ -50,10 +67,12 @@ small{color:var(--mut)}
   <h1>Battery Emulator</h1>
   <span id="st" class="pill">…</span>
   <small id="src"></small>
-  <nav><a href="/">Main page</a><a href="/settings">Settings</a><a href="/cellmonitor">Cells</a><a href="/events">Events</a><a href="/update">Update</a></nav>
 </header>
+<nav id="nav"><a data-v="">Main</a><a data-v="settings">Settings</a><a data-v="cells">Cells</a><a data-v="events">Events</a><a data-v="update">Update</a><a class="x" href="/">Classic pages</a></nav>
 <div class="banner" id="banner"></div>
-<main>
+
+<!-- Main -->
+<main id="v-" class="live">
   <section class="card" id="c1"><h2>Battery <span id="b1n"></span></h2>
     <div class="big"><span id="soc">–</span> %</div><div class="bar"><i id="socbar"></i></div>
     <div id="b1"></div></section>
@@ -67,17 +86,73 @@ small{color:var(--mut)}
   <section class="card wide"><h2>Last 10 minutes</h2><canvas id="ch"></canvas>
     <div class="legend"><span><b style="background:var(--soc)"></b>SOC %</span><span><b style="background:var(--v)"></b>Voltage V</span><span><b style="background:var(--a)"></b>Current A</span></div></section>
 </main>
+
+<!-- Settings -->
+<main id="v-settings" class="hide">
+  <section class="card wide"><h2>Limits – take effect at once</h2>
+    <div class="form2" id="lim"></div>
+    <p><button id="limsave">Save limits</button> <span id="limmsg" class="mut"></span></p></section>
+  <section class="card wide"><h2>Emulator settings – take effect after a restart</h2>
+    <div class="note">These are the settings of the upstream settings page, saved the same way. Most of them are read only at start: after saving, restart the emulator. With the core on the S32K both chips restart.</div>
+    <div id="setmsg"></div>
+    <div id="sethost"><small>Loading…</small></div>
+    <p><button id="setsave" disabled>Save settings</button> <button id="reboot" class="sec">Restart emulator</button></p>
+    <p class="mut">Network, web access, MQTT and logging settings stay on the ESP32 and are not sent to the S32K: edit them on the <a href="/settings">classic settings page</a>.</p></section>
+</main>
+
+<!-- Cells -->
+<main id="v-cells" class="hide live"><div id="cellcards" class="wide" style="display:grid;gap:12px"></div></main>
+
+<!-- Events -->
+<main id="v-events" class="hide">
+  <section class="card wide"><h2>Event log <small id="evn"></small></h2>
+    <p><button id="evclear" class="red">Clear events</button> <small>Clears the log here and on the S32K.</small></p>
+    <div id="evt"></div></section>
+</main>
+
+<!-- Update -->
+<main id="v-update" class="hide">
+  <section class="card"><h2>Firmware</h2><div id="fw"></div></section>
+  <section class="card wide"><h2>Update the ESP32</h2>
+    <div class="note">Uploads a firmware image (firmware.bin of the miv_esp32eth_330 build) into the free OTA slot of the ESP32 and restarts it. Charging and discharging pause during the upload. The S32K is not updated here.</div>
+    <p><input type="file" id="otaf" accept=".bin"> <button id="otago" disabled>Upload</button></p>
+    <div class="prog"><i id="otabar"></i></div><div id="otamsg" class="mut"></div></section>
+</main>
+
 <script>
 "use strict";
 const $=id=>document.getElementById(id);
-const H=[];const HMAX=600;let errs=0,timer=null,last=null;
-const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const H=[];const HMAX=600;let errs=0,timer=null,last=null,view="",vtimer=null;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const f=(v,d,u)=>v===null||v===undefined?"–":(typeof v==="number"?v.toFixed(d):esc(v))+(u?" "+u:"");
 const yn=v=>v===null||v===undefined?"–":(v?'<span class="yes">yes</span>':'<span class="no">no</span>');
 const rows=a=>a.map(r=>'<div class="row"><span>'+r[0]+'</span><span>'+r[1]+'</span></div>').join("");
 const dur=s=>{if(s===null||s===undefined)return"–";const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return(d?d+"d ":"")+(d||h?h+"h ":"")+m+"m"};
+const ago=ms=>{const s=Math.round(ms/1000);return s<60?s+" s":s<3600?Math.round(s/60)+" min":s<86400?(s/3600).toFixed(1)+" h":(s/86400).toFixed(1)+" d"};
 const kw=w=>w===null||w===undefined?"–":(w/1000).toFixed(1)+" kW";
+const kwh=w=>w===null||w===undefined?"–":(w/1000).toFixed(1)+" kWh";
+const getj=async u=>{const r=await fetch(u,{cache:"no-store"});if(!r.ok)throw new Error(r.status+" "+(await r.text()).slice(0,80));return r.json()};
+const form=o=>new URLSearchParams(o).toString();
 
+/* ---- views ---- */
+function show(v,push){
+  view=v;
+  document.querySelectorAll("main").forEach(m=>m.classList.toggle("hide",m.id!=="v-"+v));
+  document.querySelectorAll("#nav a[data-v]").forEach(a=>a.classList.toggle("on",a.dataset.v===v));
+  if(push)history.pushState(null,"","/miv/"+v);
+  clearTimeout(vtimer);vtimer=null;
+  if(v==="settings")loadSettings();
+  if(v==="cells")cellsTick();
+  if(v==="events")eventsTick();
+  if(v==="update")loadFw();
+  if(v==="")draw();
+}
+document.querySelectorAll("#nav a[data-v]").forEach(a=>{a.href="/miv/"+a.dataset.v;a.onclick=e=>{e.preventDefault();show(a.dataset.v,true)}});
+window.addEventListener("popstate",()=>show(fromPath(),false));
+const fromPath=()=>{const p=location.pathname.replace(/^\/miv\/?/,"").replace(/\/$/,"");return["settings","cells","events","update"].includes(p)?p:""};
+function every(fn,ms){clearTimeout(vtimer);vtimer=null;if(!document.hidden)vtimer=setTimeout(fn,ms)}
+
+/* ---- main ---- */
 function pack(j,p,box,socId,barId){
   const g=k=>j[p+k];
   $(socId).textContent=f(g("soc_pct"),1);
@@ -86,7 +161,7 @@ function pack(j,p,box,socId,barId){
     ["Voltage / current",f(g("voltage_V"),1,"V")+" / "+f(g("current_A"),1,"A")],
     ["Power",kw(g("power_W"))],
     ["SOC real / SOH",f(g("soc_real_pct"),1,"%")+" / "+f(g("soh_pct"),1,"%")],
-    ["Remaining / capacity",kw(g("remaining_Wh")).replace("kW","kWh")+" / "+kw(g("capacity_Wh")).replace("kW","kWh")],
+    ["Remaining / capacity",kwh(g("remaining_Wh"))+" / "+kwh(g("capacity_Wh"))],
     ["Temperature min / max",f(g("temp_min_C"),1)+" / "+f(g("temp_max_C"),1,"°C")],
     ["Cells min / max / Δ",f(g("cell_min_mV"),0)+" / "+f(g("cell_max_mV"),0)+" / "+f(g("cell_dev_mV"),0,"mV")],
     ["Limit charge / discharge",kw(g("chg_lim_W"))+" / "+kw(g("dis_lim_W"))],
@@ -103,6 +178,8 @@ function render(j){
   const stale=j.src==="s32k"&&!j.link_ok;
   document.body.className=stale?"stale":"";
   if(stale)$("banner").textContent="S32K not responding for "+Math.round((j.link_age_ms||0)/1000)+" s – values below are the last ones received";
+  if(!stale){H.push([Date.now(),j.soc_pct,j.voltage_V,j.current_A]);if(H.length>HMAX)H.shift();}
+  if(view!=="")return;
   $("b1n").textContent=j.bat_proto?"· "+j.bat_proto:"";
   pack(j,"",'b1','soc','socbar');
   $("c2").classList.toggle("hide",j.b2_soc_pct===null);
@@ -118,7 +195,6 @@ function render(j){
     ["Equipment stop",j.equipment_stop?'<span class="no">ACTIVE</span>':"off"],["Paused",j.paused?'<span class="no">yes</span>':"no"],
     ["Contactor lockout (S32K)",j.s32k_lockout===null?"–":(j.s32k_lockout?'<span class="no">LOCKED</span>':"no")]
   ]);
-  const s=j.s32k_uptime_s!==null;
   $("cs").classList.toggle("hide",j.src!=="s32k");
   if(j.src==="s32k"){
     $("s32").innerHTML=rows([
@@ -127,24 +203,23 @@ function render(j){
       ["Longest core tick",f(j.s32k_tick_max_us,0,"µs")],["RX frames dropped",f(j.s32k_rx_drop,0)],
       ["Settings revision",f(j.settings_rev,0)],["Link",j.link_ok?"ok":'<span class="no">lost</span>']
     ]);
-    $("can").innerHTML=s?"<tr><th>CAN</th><th>state</th><th>kbit/s</th><th>rx</th><th>tx</th><th>err</th><th>drop</th></tr>"+
+    $("can").innerHTML=j.s32k_uptime_s!==null?"<tr><th>CAN</th><th>state</th><th>kbit/s</th><th>rx</th><th>tx</th><th>err</th><th>drop</th></tr>"+
       ["can0","can1","can4"].map(c=>"<tr><td>"+c.toUpperCase()+"</td><td>"+f(j[c+"_state"]).replace("error-","")+(j[c+"_tec"]?" ("+j[c+"_tec"]+"/"+j[c+"_rec"]+")":"")+
       "</td><td>"+f(j[c+"_kbps"],0)+"</td><td>"+f(j[c+"_rx"],0)+"</td><td>"+f(j[c+"_tx"],0)+"</td><td>"+f(j[c+"_txerr"],0)+"</td><td>"+f(j[c+"_drop"],0)+"</td></tr>").join(""):"";
   }
   $("ev").innerHTML=j.ev.length?j.ev.map(e=>'<div class="ev"><span class="lv '+esc(e.level)+'">'+esc(e.level)+"</span><span>"+esc(e.name)+(e.data?" <small>("+e.data+")</small>":"")+"</span></div>").join(""):"<small>none</small>";
-  if(!stale){H.push([Date.now(),j.soc_pct,j.voltage_V,j.current_A]);if(H.length>HMAX)H.shift();}
   draw();
 }
 
 function draw(){
   const c=$("ch"),r=window.devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;
+  if(!w)return;
   if(c.width!==w*r||c.height!==h*r){c.width=w*r;c.height=h*r}
   const x=c.getContext("2d");x.setTransform(r,0,0,r,0,0);x.clearRect(0,0,w,h);
   const cs=getComputedStyle(document.documentElement),col=n=>cs.getPropertyValue(n).trim();
   const now=Date.now(),t0=now-600000,L=44,R=w-44,lane=(h-16)/3;
   x.font="11px system-ui,sans-serif";x.lineWidth=1.5;
-  const series=[[1,"--soc","%",0,100],[2,"--v","V",null,null],[3,"--a","A",null,null]];
-  series.forEach((s,n)=>{
+  [[1,"--soc","%",0,100],[2,"--v","V",null,null],[3,"--a","A",null,null]].forEach((s,n)=>{
     const top=n*lane+4,bot=top+lane-8,vals=H.map(p=>p[s[0]]).filter(v=>v!==null&&v!==undefined);
     let lo=s[3],hi=s[4];
     if(lo===null){lo=Math.min(...vals,s[0]===3?-1:Infinity);hi=Math.max(...vals,s[0]===3?1:-Infinity);
@@ -165,18 +240,173 @@ function draw(){
 
 async function poll(){
   timer=null;
-  try{
-    const r=await fetch("/miv/api/status",{cache:"no-store"});
-    if(!r.ok)throw new Error(r.status);
-    render(await r.json());errs=0;
-  }catch(e){
-    errs++;
-    if(errs>=2){document.body.className="down";$("banner").textContent="ESP32 not reachable ("+e.message+") – retrying"}
-  }
+  try{render(await getj("/miv/api/status"));errs=0}
+  catch(e){errs++;if(errs>=2){document.body.className="down";$("banner").textContent="ESP32 not reachable ("+e.message+") – retrying"}}
   if(!document.hidden)timer=setTimeout(poll,errs>=3?5000:1000);
 }
-document.addEventListener("visibilitychange",()=>{if(!document.hidden&&!timer)poll()});
+// Back to a hidden tab: the live views ask again; the settings form keeps what was typed
+document.addEventListener("visibilitychange",()=>{if(document.hidden)return;if(!timer)poll();if(view==="cells")cellsTick();if(view==="events")eventsTick()});
 window.addEventListener("resize",draw);
+
+/* ---- cells ---- */
+async function cellsTick(){
+  if(view!=="cells")return;
+  try{
+    const n=Math.max(1,last?last.batteries||1:1),host=$("cellcards");
+    let html="";
+    for(let b=1;b<=n;b++){
+      const c=await getj("/miv/api/cells?b="+b),p=b===1?"":"b"+b+"_";
+      if(!c.n){html+='<section class="card"><h2>Battery '+b+'</h2><small>Cell voltages not read yet</small></section>';continue}
+      const v=c.mV,mx=Math.max(...v),mn=Math.min(...v),avg=v.reduce((a,x)=>a+x,0)/v.length,bal=new Set(c.balancing||[]);
+      const t=last?[last[p+"temp_min_C"],last[p+"temp_max_C"]]:[null,null];
+      html+='<section class="card"><h2>Battery '+b+' – '+c.n+' cells</h2><div class="row" style="flex-wrap:wrap;border:0">'+
+        "<span>min <b>"+mn+"</b> mV (cell "+(v.indexOf(mn)+1)+")</span><span>max <b>"+mx+"</b> mV (cell "+(v.indexOf(mx)+1)+")</span><span>Δ <b>"+(mx-mn)+"</b> mV</span><span>avg "+avg.toFixed(0)+" mV</span><span>T "+f(t[0],1)+" … "+f(t[1],1,"°C")+"</span><span>balancing "+bal.size+"</span></div>"+
+        '<div class="grid">'+v.map((x,i)=>'<div class="cell'+(x===mx&&mx!==mn?" mx":"")+(x===mn&&mx!==mn?" mn":"")+(bal.has(i+1)?" bal":"")+'"><b>'+(i+1)+"</b>"+x+"</div>").join("")+"</div>"+
+        '<p class="mut">Red frame: highest, blue: lowest, dashed: balancing.</p></section>';
+    }
+    host.innerHTML=html;
+  }catch(e){$("cellcards").innerHTML='<section class="card"><small>'+esc(e.message)+"</small></section>"}
+  every(cellsTick,1000);
+}
+
+/* ---- events ---- */
+async function eventsTick(){
+  if(view!=="events")return;
+  try{
+    const j=await getj("/miv/api/events");
+    $("evn").textContent="("+j.count+")";
+    $("evt").innerHTML=j.ev.length?j.ev.map(e=>'<div class="erow"><div class="h"><span class="lv '+esc(e.level)+'">'+esc(e.level)+"</span><b>"+esc(e.name)+"</b>"+
+      (e.state==="active"||e.state==="latched"?' <span class="no">'+e.state+"</span>":' <small>'+esc(e.state)+"</small>")+'</div><div class="m">'+esc(e.msg)+
+      "</div><small>"+e.count+"× · last "+ago(e.ago_ms)+" ago · data "+e.data+"</small></div>").join(""):"<small>No events</small>";
+  }catch(e){$("evt").innerHTML="<small>"+esc(e.message)+"</small>"}
+  every(eventsTick,1000);
+}
+$("evclear").onclick=async()=>{
+  if(!confirm("Clear the event log?"))return;
+  try{await fetch("/miv/api/events/clear",{method:"POST"});eventsTick()}catch(e){alert(e.message)}
+};
+
+/* ---- settings ---- */
+const LIM=[["soc_max_pct","Highest SOC to charge to, %",0.1],["soc_min_pct","Lowest SOC to discharge to, %",0.1],
+  ["max_charge_A","Maximum charge current, A",0.1],["max_discharge_A","Maximum discharge current, A",0.1],["soc_scaling","Scale SOC to this window","b"]];
+// Upstream cards and fields that only concern the ESP32: kept in the form (it posts every field) but not shown
+const NET_CARDS=/^(Network config|Web interface access|Integration settings|Debug options)/;
+const NET_FIELDS=/^(MEASURECPUTEMP|CPUTEMPOFFSET|LEDMODE)$/;
+let limRev=null;
+
+async function loadSettings(){
+  try{
+    const s=await getj("/miv/api/settings");limRev=s.settings_rev;
+    $("lim").innerHTML=LIM.map(l=>"<label for='l_"+l[0]+"'>"+l[1]+"</label>"+(l[2]==="b"?
+      "<input type='checkbox' id='l_"+l[0]+"'"+(s[l[0]]?" checked":"")+">":
+      "<input type='number' step='"+l[2]+"' id='l_"+l[0]+"' value='"+s[l[0]]+"' style='max-width:120px'>")).join("");
+  }catch(e){$("lim").innerHTML="<small>"+esc(e.message)+"</small>"}
+  loadForm();
+}
+
+$("limsave").onclick=async()=>{
+  const o={};LIM.forEach(l=>{const el=$("l_"+l[0]);o[l[0]]=l[2]==="b"?(el.checked?1:0):el.value});
+  $("limmsg").textContent="Saving…";
+  try{
+    const r=await fetch("/miv/api/settings",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:form(o)});
+    if(r.status!==202)throw new Error(await r.text());
+    const a=await r.json();
+    if(a.settings_rev===null){$("limmsg").textContent="Saved.";return}
+    for(let i=0;i<20;i++){await new Promise(z=>setTimeout(z,500));const s=await getj("/miv/api/settings");
+      if(s.settings_rev!==a.settings_rev){$("limmsg").textContent="Applied on the S32K (revision "+s.settings_rev+").";loadSettings();return}}
+    $("limmsg").textContent="Saved; no change came back from the S32K (nothing changed, or it refused).";
+  }catch(e){$("limmsg").textContent="Not saved: "+e.message}
+};
+
+let upForm=null;
+async function loadForm(){
+  const host=$("sethost");
+  try{
+    const html=await (await fetch("/settings",{cache:"no-store"})).text();
+    const doc=new DOMParser().parseFromString(html,"text/html");
+    const fm=doc.querySelector("form[action*='saveSettings']");
+    if(!fm)throw new Error("no settings form on /settings");
+    fm.removeAttribute("onsubmit");
+    fm.querySelectorAll("[onclick*='askReboot']").forEach(e=>e.closest("div")?.remove());
+    fm.querySelectorAll(".settings-card").forEach(c=>{const h=c.querySelector("h3");if(h&&NET_CARDS.test(h.textContent.trim()))c.style.display="none"});
+    fm.querySelectorAll("[name]").forEach(e=>{if(NET_FIELDS.test(e.name)){e.style.display="none";const l=e.previousElementSibling;if(l&&l.tagName==="LABEL")l.style.display="none"}});
+    // The upstream styles inside a shadow root: they rule the form there and nothing else of this page
+    const sh=host.shadowRoot||host.attachShadow({mode:"open"});
+    sh.innerHTML="";
+    doc.querySelectorAll("style").forEach(s=>sh.appendChild(document.importNode(s,true)));
+    const own=document.createElement("style");
+    own.textContent=".settings-card{background:var(--bg)!important;color:var(--fg)!important;border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin:0 0 10px}"+
+      "h3{margin:.2em 0 .5em;font-size:15px}input,select{color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:5px;padding:3px 5px;font:inherit;max-width:100%!important;min-width:0}"+
+      "label{color:var(--fg)}.settings-card *{min-width:0}";
+    sh.appendChild(own);
+    upForm=document.importNode(fm,true);
+    sh.appendChild(upForm);
+    // What the upstream page script does: the form carries every field's value as data-*, the CSS shows
+    // the fields that belong to the chosen battery, inverter, shunt, ...
+    upForm.querySelectorAll("select,input").forEach(el=>{
+      const ch=()=>{if(el.name)upForm.setAttribute("data-"+el.name.toLowerCase(),el.type==="checkbox"?el.checked:el.value)};
+      el.addEventListener("change",ch);ch();
+    });
+    const shunt=upForm.querySelector("select[name=shunttype]");
+    const syncShunt=()=>{const o=shunt&&shunt.options[shunt.selectedIndex];if(o&&getComputedStyle(o).display==="none"){shunt.value="0";shunt.dispatchEvent(new Event("change"))}};
+    upForm.querySelectorAll("select[name=battery],select[name=inverter]").forEach(s=>s.addEventListener("change",syncShunt));
+    syncShunt();
+    upForm.addEventListener("submit",e=>{e.preventDefault();saveForm()});
+    $("setsave").disabled=false;
+    host.querySelector("small")?.remove();
+  }catch(e){host.innerHTML="<small>Could not load the settings form: "+esc(e.message)+"</small>"}
+}
+
+async function saveForm(){
+  if(!upForm)return;
+  $("setsave").disabled=true;
+  const msg=$("setmsg");
+  try{
+    const r=await fetch("/saveSettings",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(new FormData(upForm)).toString()});
+    const t=r.ok?"":await r.text();
+    if(!r.ok)throw new Error(t||r.status);
+    msg.innerHTML='<div class="note ok">Saved. Restart the emulator for the new settings to take effect.</div>';
+    loadForm();
+  }catch(e){msg.innerHTML='<div class="note err">Not saved: '+esc(e.message)+"</div>"}
+  $("setsave").disabled=false;
+}
+$("setsave").onclick=saveForm;
+$("reboot").onclick=async()=>{
+  if(!confirm("Restart the emulator now? Charging and discharging stop until it is back."))return;
+  $("setmsg").innerHTML='<div class="note">Restarting… this page reconnects by itself.</div>';
+  try{await fetch("/reboot",{cache:"no-store"})}catch(e){}
+};
+
+/* ---- update ---- */
+async function loadFw(){
+  let fw={};try{fw=await getj("/GetFirmwareInfo")}catch(e){}
+  $("fw").innerHTML=rows([["Hardware",f(fw.hardware)],["ESP32 firmware",f(fw.firmware)],["ESP32 up",dur(last&&last.esp_uptime_s)],
+    ["S32K firmware",f(last&&last.s32k_fw)],["S32K up",dur(last&&last.s32k_uptime_s)]]);
+}
+$("otaf").onchange=()=>{$("otago").disabled=!$("otaf").files.length};
+$("otago").onclick=()=>{
+  const file=$("otaf").files[0];if(!file)return;
+  if(!confirm("Upload "+file.name+" ("+Math.round(file.size/1024)+" kB) and restart the ESP32?"))return;
+  otaUpload(file);
+};
+async function otaUpload(file){
+  const m=$("otamsg"),bar=$("otabar");$("otago").disabled=true;bar.style.width="0";
+  try{
+    const s=await fetch("/ota/start?mode=fr",{cache:"no-store"});
+    if(!s.ok)throw new Error("start: "+await s.text());
+    await new Promise((ok,bad)=>{
+      const x=new XMLHttpRequest(),fd=new FormData();fd.append("file",file,file.name);
+      x.upload.onprogress=e=>{if(e.lengthComputable){bar.style.width=(100*e.loaded/e.total)+"%";m.textContent="Uploading "+Math.round(100*e.loaded/e.total)+" %"}};
+      x.onload=()=>x.status===200?ok():bad(new Error(x.responseText||x.status));
+      x.onerror=()=>bad(new Error("connection lost"));
+      x.open("POST","/ota/upload");x.send(fd);
+    });
+    bar.style.width="100%";m.textContent="Written. The ESP32 restarts; this page reconnects by itself.";
+  }catch(e){m.textContent="Update failed: "+e.message;bar.style.width="0"}
+  $("otago").disabled=!$("otaf").files.length;
+}
+
+show(fromPath(),false);
 poll();
 </script>
 </body>

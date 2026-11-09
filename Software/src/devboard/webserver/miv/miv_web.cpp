@@ -13,6 +13,7 @@
 #include "../../../datalayer/datalayer.h"
 #include "../../../devboard/safety/safety.h"
 #include "../../../devboard/utils/events.h"
+#include "../../../devboard/utils/millis64.h"
 #include "../../../inverter/INVERTERS.h"
 #include "../webserver.h"
 #ifdef ETHERNET_W5500
@@ -620,6 +621,87 @@ static void handle_settings_post(AsyncWebServerRequest* request) {
   send_json(request, 202, buf);
 }
 
+/* ---- /miv/api/events: the upstream event log, newest first, as the upstream events page lists it ------
+   With the core on the S32K its active events are mirrored into this list (be_snapshot.cpp), so the list is
+   one; their count and time are those of the mirror on this chip. */
+static int write_events(JsonOut& j) {
+  struct Item {
+    uint8_t id;
+    uint64_t ts;
+  };
+  static Item items[EVENT_NOF_EVENTS];
+  int n = 0;
+  for (int i = 0; i < EVENT_NOF_EVENTS; i++) {
+    const EVENTS_STRUCT_TYPE* e = get_event_pointer((EVENTS_ENUM_TYPE)i);
+    if (e->occurences > 0) {
+      items[n++] = {(uint8_t)i, e->timestamp};
+    }
+  }
+  // newest first; few items, so a plain insertion sort
+  for (int a = 1; a < n; a++) {
+    for (int b = a; b > 0 && items[b].ts > items[b - 1].ts; b--) {
+      const Item t = items[b];
+      items[b] = items[b - 1];
+      items[b - 1] = t;
+    }
+  }
+  static const char* const state_names[] = {"pending", "inactive", "active", "latched"};
+  const uint64_t now = millis64();
+  j.open('{');
+  j.num("v", 1);
+  j.num("count", n);
+  j.key("ev");
+  j.open('[');
+  for (int k = 0; k < n; k++) {
+    const EVENTS_ENUM_TYPE id = (EVENTS_ENUM_TYPE)items[k].id;
+    const EVENTS_STRUCT_TYPE* e = get_event_pointer(id);
+    j.item();
+    j.open('{');
+    j.str("name", get_event_enum_string(id));
+    j.str("level", get_event_level_string(id));
+    j.str("state", (unsigned)e->state < 4 ? state_names[e->state] : "unknown");
+    j.unum("count", e->occurences);
+    j.unum("ago_ms", (unsigned long)(now - e->timestamp));
+    j.num("data", e->data);
+    j.str("msg", get_event_message_string(id).c_str());
+    j.close('}');
+  }
+  j.close(']');
+  j.close('}');
+  return n;
+}
+
+static void handle_events(AsyncWebServerRequest* request) {
+  // The messages make it a few kB: on the heap only while it is sent
+  for (size_t cap = 8192; cap <= 32768; cap *= 2) {
+    char* buf = (char*)malloc(cap);
+    if (buf == nullptr) {
+      request->send(503, "text/plain", "no memory");
+      return;
+    }
+    JsonOut j(buf, cap);
+    write_events(j);
+    if (!j.overflow()) {
+      send_json(request, 200, buf);
+      free(buf);
+      return;
+    }
+    free(buf);
+  }
+  request->send(500, "text/plain", "event list too long");
+}
+
+// The same as the upstream /clearevents, which answers with a page instead
+static void handle_events_clear(AsyncWebServerRequest* request) {
+  reset_all_events();
+#ifdef CAN_VIA_LINK
+  if (be_remote_active()) {
+    be_remote_cmd(BE_CMD_CLEAR_EVENTS, 0, 0);
+  }
+#endif
+  send_json(request, 200, "{\"v\":1,\"cleared\":true}");
+}
+
 /* ---- the page ----------------------------------------------------------------------------------------- */
 static void handle_page(AsyncWebServerRequest* request) {
   AsyncWebServerResponse* r = request->beginResponse(200, "text/html", miv_page_gz, sizeof(miv_page_gz));
@@ -636,6 +718,10 @@ void init_miv_web(AsyncWebServer& server) {
   server.on("/miv/api/cells", HTTP_GET, handle_cells);
   server.on("/miv/api/settings", HTTP_GET, handle_settings_get);
   server.on("/miv/api/settings", HTTP_POST, handle_settings_post);
-  server.on("/miv/", HTTP_GET, handle_page);
-  server.on("/miv", HTTP_GET, [](AsyncWebServerRequest* request) { request->redirect("/miv/"); });
+  server.on("/miv/api/events/clear", HTTP_POST, handle_events_clear);
+  server.on("/miv/api/events", HTTP_GET, handle_events);
+  // One page for /miv and everything under it that is not an API route above (a handler without a
+  // wildcard also takes the paths below it, and the first one registered wins): the script picks the view
+  // from the path (/miv/, /miv/settings, /miv/cells, /miv/events, /miv/update)
+  server.on("/miv", HTTP_GET, handle_page);
 }
