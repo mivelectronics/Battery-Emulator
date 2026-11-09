@@ -182,6 +182,7 @@ function render(j){
   document.body.className=stale?"stale":"";
   if(stale)$("banner").textContent="S32K not responding for "+Math.round((j.link_age_ms||0)/1000)+" s – values below are the last ones received";
   if(!stale){H.push([Date.now(),j.soc_pct,j.voltage_V,j.current_A]);if(H.length>HMAX)H.shift();}
+  if(view==="update")drawFw();
   if(view!=="")return;
   $("b1n").textContent=j.bat_proto?"· "+j.bat_proto:"";
   pack(j,"",'b1','soc','socbar');
@@ -395,10 +396,17 @@ $("reboot").onclick=async()=>{
 };
 
 /* ---- update ---- */
+// The hardware name once from /GetFirmwareInfo; versions and uptimes from every status, so that the card
+// shows the new firmware as soon as the ESP32 is back after an update
+let fwHw=null;
 async function loadFw(){
-  let fw={};try{fw=await getj("/GetFirmwareInfo")}catch(e){}
-  $("fw").innerHTML=rows([["Hardware",f(fw.hardware)],["ESP32 firmware",f(fw.firmware)],["ESP32 up",dur(last&&last.esp_uptime_s)],
-    ["S32K firmware",f(last&&last.s32k_fw)],["S32K up",dur(last&&last.s32k_uptime_s)]]);
+  if(fwHw===null){try{fwHw=(await getj("/GetFirmwareInfo")).hardware}catch(e){}}
+  drawFw();
+}
+function drawFw(){
+  const j=last||{};
+  $("fw").innerHTML=rows([["Hardware",f(fwHw)],["ESP32 firmware",f(j.esp_fw)],["ESP32 up",dur(j.esp_uptime_s)],
+    ["S32K firmware",f(j.s32k_fw)],["S32K up",dur(j.s32k_uptime_s)]]);
 }
 $("otaf").onchange=()=>{$("otago").disabled=!$("otaf").files.length};
 $("otago").onclick=()=>{
