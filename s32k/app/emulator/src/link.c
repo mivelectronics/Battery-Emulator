@@ -13,7 +13,6 @@
 #include "be_snapshot.h"
 #include "can_io.h"
 
-#define FW_VERSION "s32k-emulator 0.4"
 
 static const struct device *const link_uart = DEVICE_DT_GET(DT_ALIAS(be_link));
 
@@ -128,7 +127,7 @@ static void send_hello(void)
 		.layout_hash = be_snapshot_layout_hash(),
 	};
 
-	strncpy(h.fw_version, FW_VERSION, sizeof(h.fw_version) - 1);
+	strncpy(h.fw_version, LINK_FW_VERSION, sizeof(h.fw_version) - 1);
 	link_send(BE_LINK_HELLO, &h, sizeof(h));
 }
 

@@ -11,6 +11,9 @@
 
 #include "be_link.h"
 
+/* In HELLO and in the SNAP_S32K snapshot section */
+#define LINK_FW_VERSION "s32k-emulator 0.5"
+
 struct link_stats {
 	uint32_t tx_frames, tx_drops, rx_bytes, rx_drops, can_q_drops;
 	uint32_t uart_overrun, uart_framing, uart_noise;

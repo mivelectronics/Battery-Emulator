@@ -33,6 +33,7 @@ enum SnapSection : uint8_t {
   SNAP_BATTERY = 4,
   SNAP_CELLS = 5,
   SNAP_EVENTS = 6,
+  SNAP_S32K = 7,
 };
 
 // be_snap_system.flags
@@ -178,6 +179,13 @@ struct be_snap_events {
   be_snap_event events[MAX_SNAP_EVENTS];  // only count entries are sent
 } BE_LINK_PACKED;
 
+struct be_snap_s32k {
+  uint8_t section;
+  uint8_t reserved[3];
+  be_s32k_status s;
+} BE_LINK_PACKED;
+
+static_assert(sizeof(be_snap_s32k) <= BE_LINK_MAX_PAYLOAD, "does not fit a frame");
 static_assert(sizeof(be_snap_system) <= BE_LINK_MAX_PAYLOAD, "does not fit a frame");
 static_assert(sizeof(be_snap_aggregate) <= BE_LINK_MAX_PAYLOAD, "does not fit a frame");
 static_assert(sizeof(be_snap_settings) <= BE_LINK_MAX_PAYLOAD, "does not fit a frame");
@@ -189,8 +197,9 @@ static_assert(sizeof(DATALAYER_BATTERY_SETTINGS_TYPE) <= BE_SNAPSHOT_SETTINGS_MA
 
 uint32_t be_snapshot_layout_hash(void) {
   // Anything that would make the two ends read each other's frames wrongly
-  uint32_t h = 3;  // bump when the meaning of a field changes
+  uint32_t h = 4;  // bump when the meaning of a field changes
   const uint32_t parts[] = {sizeof(be_snap_system),
+                            sizeof(be_snap_s32k),
                             sizeof(be_snap_aggregate),
                             sizeof(be_snap_settings),
                             sizeof(be_snap_battery),
@@ -379,6 +388,13 @@ bool be_snapshot_send_step(int (*send)(const void*, uint16_t)) {
         send_cells(3, send);
       }
       break;
+    case 9: {
+      static be_snap_s32k k;
+      k = {};
+      k.section = SNAP_S32K;
+      be_s32k_status_fill(&k.s);
+      send(&k, sizeof(k));
+    } break;
     default: {
       static be_snap_events e;
       e.section = SNAP_EVENTS;
@@ -463,6 +479,10 @@ static bool layout_warned = false;
 static uint32_t seen_settings_revision = 0;
 static bool settings_revision_valid = false;
 static uint32_t restart_at_ms = 0;
+static bool snapshot_seen = false;
+static be_s32k_status s32k_status;
+static bool s32k_status_valid = false;
+static volatile uint32_t apply_seq = 0;
 
 /* ---- Out to the S32K: one thing at a time, repeated until acknowledged ---- */
 struct OutItem {
@@ -751,6 +771,31 @@ bool be_remote_active(void) {
   return active;
 }
 
+uint32_t be_remote_snapshot_age_ms(void) {
+  return snapshot_seen ? millis() - last_snapshot_ms : UINT32_MAX;
+}
+
+bool be_remote_settings_revision(uint32_t* rev) {
+  *rev = seen_settings_revision;
+  return settings_revision_valid;
+}
+
+bool be_remote_s32k_status(be_s32k_status* out) {
+  // The core task writes it; a copy that changed meanwhile is taken again
+  for (int tries = 0; tries < 4; tries++) {
+    const uint32_t seq = apply_seq;
+    memcpy(out, &s32k_status, sizeof(*out));
+    if ((seq & 1u) == 0 && seq == apply_seq) {
+      break;
+    }
+  }
+  return s32k_status_valid;
+}
+
+uint32_t be_remote_apply_seq(void) {
+  return apply_seq;
+}
+
 static void apply_system(const be_snap_system& m) {
   auto& st = datalayer.system.status;
   auto& info = datalayer.system.info;
@@ -907,13 +952,27 @@ static void apply_events(const uint8_t* payload, uint16_t len) {
   }
 }
 
+static void apply_snapshot(const uint8_t* p, uint16_t len);
+
 void be_remote_on_snapshot(const uint8_t* p, uint16_t len) {
   if (!active || len < 1) {
     return;
   }
   last_snapshot_ms = millis();
+  snapshot_seen = true;
+  apply_seq = apply_seq + 1;  // odd: readers on other tasks wait
+  apply_snapshot(p, len);
+  apply_seq = apply_seq + 1;
+}
 
+static void apply_snapshot(const uint8_t* p, uint16_t len) {
   switch (p[0]) {
+    case SNAP_S32K:
+      if (len == sizeof(be_snap_s32k)) {
+        memcpy(&s32k_status, p + offsetof(be_snap_s32k, s), sizeof(s32k_status));
+        s32k_status_valid = true;
+      }
+      break;
     case SNAP_SYSTEM:
       if (len == sizeof(be_snap_system)) {
         be_snap_system m;

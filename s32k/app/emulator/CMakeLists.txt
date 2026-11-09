@@ -74,7 +74,8 @@ set_source_files_properties(${BE_SOFTWARE}/src/communication/nvm/comm_nvm.cpp PR
 target_link_libraries(app PUBLIC be_core)
 target_include_directories(app PRIVATE port ${BE_SOFTWARE}/src/communication/link)
 target_compile_definitions(app PRIVATE HW_MIV_S32K)
-target_sources(app PRIVATE port/be_core_run.c port/port_time.c port/be_kv.c port/be_link_cmd.c port/be_gpio.c)
+target_sources(app PRIVATE port/be_core_run.c port/port_time.c port/be_kv.c port/be_link_cmd.c port/be_gpio.c
+  port/be_s32k_status.c)
 
 # Bench simulator: west build ... -- -DBE_SIM=1
 if(BE_SIM)

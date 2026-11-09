@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Battery Emulator</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#1d2330;--mut:#6b7280;--line:#e3e6ea;--ok:#1a8f4c;--warn:#b7791f;--err:#c53030;--info:#2b6cb0;--soc:#2b6cb0;--v:#7b3fb3;--a:#c05621}
+@media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d2128;--fg:#e6e8eb;--mut:#9aa1ab;--line:#2c313a;--soc:#63a4ff;--v:#b98cf0;--a:#f0a058}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+header h1{font-size:17px;margin:0}
+header nav{margin-left:auto;display:flex;flex-wrap:wrap;gap:10px}
+a{color:var(--info);text-decoration:none}
+.pill{padding:2px 10px;border-radius:12px;font-weight:600;color:#fff;background:var(--mut)}
+.pill.ok{background:var(--ok)}.pill.err{background:var(--err)}.pill.warn{background:var(--warn)}
+.banner{display:none;padding:8px 16px;background:var(--mut);color:#fff;font-weight:600}
+body.stale .banner,body.down .banner{display:block}
+body.down .banner{background:var(--err)}
+body.stale main,body.down main{opacity:.45;filter:grayscale(1)}
+main{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;padding:12px 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin:0 0 8px}
+.wide{grid-column:1/-1}
+.big{font-size:34px;font-weight:700;line-height:1.1}
+.row{display:flex;justify-content:space-between;gap:8px;padding:2px 0;border-bottom:1px dashed var(--line)}
+.row:last-child{border-bottom:0}
+.row span:first-child{color:var(--mut)}
+.row span:last-child{font-variant-numeric:tabular-nums;text-align:right}
+.yes{color:var(--ok);font-weight:600}.no{color:var(--err);font-weight:600}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:6px 0 8px}
+.bar i{display:block;height:100%;background:var(--soc);width:0}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{padding:3px 4px;text-align:right;border-bottom:1px dashed var(--line)}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--mut);font-weight:500}
+.ev{display:flex;gap:8px;align-items:baseline;padding:3px 0}
+.lv{font-size:11px;font-weight:700;padding:1px 6px;border-radius:4px;color:#fff;background:var(--info)}
+.lv.WARNING{background:var(--warn)}.lv.ERROR{background:var(--err)}.lv.DEBUG{background:var(--mut)}
+canvas{width:100%;height:240px;display:block}
+.legend{display:flex;gap:14px;color:var(--mut);font-size:12px;margin-top:4px}
+.legend b{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.hide{display:none}
+small{color:var(--mut)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Battery Emulator</h1>
+  <span id="st" class="pill">…</span>
+  <small id="src"></small>
+  <nav><a href="/">Main page</a><a href="/settings">Settings</a><a href="/cellmonitor">Cells</a><a href="/events">Events</a><a href="/update">Update</a></nav>
+</header>
+<div class="banner" id="banner"></div>
+<main>
+  <section class="card" id="c1"><h2>Battery <span id="b1n"></span></h2>
+    <div class="big"><span id="soc">–</span> %</div><div class="bar"><i id="socbar"></i></div>
+    <div id="b1"></div></section>
+  <section class="card hide" id="c2"><h2>Battery 2</h2>
+    <div class="big"><span id="soc2">–</span> %</div><div class="bar"><i id="socbar2"></i></div>
+    <div id="b2"></div></section>
+  <section class="card"><h2>Inverter</h2><div id="inv"></div></section>
+  <section class="card"><h2>Safety</h2><div id="saf"></div></section>
+  <section class="card" id="cs"><h2>S32K</h2><div id="s32"></div><table id="can"></table></section>
+  <section class="card"><h2>Active events</h2><div id="ev"></div></section>
+  <section class="card wide"><h2>Last 10 minutes</h2><canvas id="ch"></canvas>
+    <div class="legend"><span><b style="background:var(--soc)"></b>SOC %</span><span><b style="background:var(--v)"></b>Voltage V</span><span><b style="background:var(--a)"></b>Current A</span></div></section>
+</main>
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const H=[];const HMAX=600;let errs=0,timer=null,last=null;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const f=(v,d,u)=>v===null||v===undefined?"–":(typeof v==="number"?v.toFixed(d):esc(v))+(u?" "+u:"");
+const yn=v=>v===null||v===undefined?"–":(v?'<span class="yes">yes</span>':'<span class="no">no</span>');
+const rows=a=>a.map(r=>'<div class="row"><span>'+r[0]+'</span><span>'+r[1]+'</span></div>').join("");
+const dur=s=>{if(s===null||s===undefined)return"–";const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return(d?d+"d ":"")+(d||h?h+"h ":"")+m+"m"};
+const kw=w=>w===null||w===undefined?"–":(w/1000).toFixed(1)+" kW";
+
+function pack(j,p,box,socId,barId){
+  const g=k=>j[p+k];
+  $(socId).textContent=f(g("soc_pct"),1);
+  $(barId).style.width=Math.max(0,Math.min(100,g("soc_pct")||0))+"%";
+  $(box).innerHTML=rows([
+    ["Voltage / current",f(g("voltage_V"),1,"V")+" / "+f(g("current_A"),1,"A")],
+    ["Power",kw(g("power_W"))],
+    ["SOC real / SOH",f(g("soc_real_pct"),1,"%")+" / "+f(g("soh_pct"),1,"%")],
+    ["Remaining / capacity",kw(g("remaining_Wh")).replace("kW","kWh")+" / "+kw(g("capacity_Wh")).replace("kW","kWh")],
+    ["Temperature min / max",f(g("temp_min_C"),1)+" / "+f(g("temp_max_C"),1,"°C")],
+    ["Cells min / max / Δ",f(g("cell_min_mV"),0)+" / "+f(g("cell_max_mV"),0)+" / "+f(g("cell_dev_mV"),0,"mV")],
+    ["Limit charge / discharge",kw(g("chg_lim_W"))+" / "+kw(g("dis_lim_W"))],
+    ["Current limit chg / dis",f(g("chg_lim_A"),1)+" / "+f(g("dis_lim_A"),1,"A")],
+    ["Cells / CAN alive",f(g("cells"),0)+" / "+yn(g("alive"))]
+  ]);
+}
+
+function render(j){
+  last=j;
+  const st=$("st");st.textContent=j.status;
+  st.className="pill "+(j.status==="FAULT"?"err":j.status==="ACTIVE"?"ok":"warn");
+  $("src").textContent=(j.src==="s32k"?"core on S32K":"local core")+" · ESP32 up "+dur(j.esp_uptime_s)+" · heap "+Math.round(j.esp_heap_B/1024)+" kB (min "+Math.round(j.esp_heap_min_B/1024)+")";
+  const stale=j.src==="s32k"&&!j.link_ok;
+  document.body.className=stale?"stale":"";
+  if(stale)$("banner").textContent="S32K not responding for "+Math.round((j.link_age_ms||0)/1000)+" s – values below are the last ones received";
+  $("b1n").textContent=j.bat_proto?"· "+j.bat_proto:"";
+  pack(j,"",'b1','soc','socbar');
+  $("c2").classList.toggle("hide",j.b2_soc_pct===null);
+  if(j.b2_soc_pct!==null)pack(j,"b2_",'b2','soc2','socbar2');
+  $("inv").innerHTML=rows([
+    ["Protocol",esc(j.inv_proto||"–")],["Inverter alive",yn(j.inv_alive)],
+    ["Sent SOC",f(j.agg_soc_pct,1,"%")],["Sent voltage / current",f(j.agg_voltage_V,1,"V")+" / "+f(j.agg_current_A,1,"A")],
+    ["Allowed charge / discharge",kw(j.agg_chg_lim_W)+" / "+kw(j.agg_dis_lim_W)],["Batteries",f(j.batteries,0)]
+  ]);
+  $("saf").innerHTML=rows([
+    ["Contactors closed",yn(j.contactors)],["Precharge",esc(j.precharge)],
+    ["Inverter allows closing",yn(j.inv_allows)],["Battery allows closing",yn(j.bat_allows)],
+    ["Equipment stop",j.equipment_stop?'<span class="no">ACTIVE</span>':"off"],["Paused",j.paused?'<span class="no">yes</span>':"no"],
+    ["Contactor lockout (S32K)",j.s32k_lockout===null?"–":(j.s32k_lockout?'<span class="no">LOCKED</span>':"no")]
+  ]);
+  const s=j.s32k_uptime_s!==null;
+  $("cs").classList.toggle("hide",j.src!=="s32k");
+  if(j.src==="s32k"){
+    $("s32").innerHTML=rows([
+      ["Firmware",f(j.s32k_fw)],["Up",dur(j.s32k_uptime_s)],["Last start",f(j.s32k_reset)],
+      ["Restarts in a row",f(j.s32k_restarts_in_row,0)],["Watchdog",yn(j.s32k_wdt)],
+      ["Longest core tick",f(j.s32k_tick_max_us,0,"µs")],["RX frames dropped",f(j.s32k_rx_drop,0)],
+      ["Settings revision",f(j.settings_rev,0)],["Link",j.link_ok?"ok":'<span class="no">lost</span>']
+    ]);
+    $("can").innerHTML=s?"<tr><th>CAN</th><th>state</th><th>kbit/s</th><th>rx</th><th>tx</th><th>err</th><th>drop</th></tr>"+
+      ["can0","can1","can4"].map(c=>"<tr><td>"+c.toUpperCase()+"</td><td>"+f(j[c+"_state"]).replace("error-","")+(j[c+"_tec"]?" ("+j[c+"_tec"]+"/"+j[c+"_rec"]+")":"")+
+      "</td><td>"+f(j[c+"_kbps"],0)+"</td><td>"+f(j[c+"_rx"],0)+"</td><td>"+f(j[c+"_tx"],0)+"</td><td>"+f(j[c+"_txerr"],0)+"</td><td>"+f(j[c+"_drop"],0)+"</td></tr>").join(""):"";
+  }
+  $("ev").innerHTML=j.ev.length?j.ev.map(e=>'<div class="ev"><span class="lv '+esc(e.level)+'">'+esc(e.level)+"</span><span>"+esc(e.name)+(e.data?" <small>("+e.data+")</small>":"")+"</span></div>").join(""):"<small>none</small>";
+  if(!stale){H.push([Date.now(),j.soc_pct,j.voltage_V,j.current_A]);if(H.length>HMAX)H.shift();}
+  draw();
+}
+
+function draw(){
+  const c=$("ch"),r=window.devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;
+  if(c.width!==w*r||c.height!==h*r){c.width=w*r;c.height=h*r}
+  const x=c.getContext("2d");x.setTransform(r,0,0,r,0,0);x.clearRect(0,0,w,h);
+  const cs=getComputedStyle(document.documentElement),col=n=>cs.getPropertyValue(n).trim();
+  const now=Date.now(),t0=now-600000,L=44,R=w-44,lane=(h-16)/3;
+  x.font="11px system-ui,sans-serif";x.lineWidth=1.5;
+  const series=[[1,"--soc","%",0,100],[2,"--v","V",null,null],[3,"--a","A",null,null]];
+  series.forEach((s,n)=>{
+    const top=n*lane+4,bot=top+lane-8,vals=H.map(p=>p[s[0]]).filter(v=>v!==null&&v!==undefined);
+    let lo=s[3],hi=s[4];
+    if(lo===null){lo=Math.min(...vals,s[0]===3?-1:Infinity);hi=Math.max(...vals,s[0]===3?1:-Infinity);
+      if(s[0]===3){const m=Math.max(Math.abs(lo),Math.abs(hi));lo=-m;hi=m}
+      if(!isFinite(lo)){lo=0;hi=1}if(hi-lo<1){const m=(hi+lo)/2;lo=m-.5;hi=m+.5}}
+    const Y=v=>bot-(v-lo)/(hi-lo)*(bot-top),X=t=>L+(t-t0)/600000*(R-L);
+    x.strokeStyle=col("--line");x.beginPath();x.moveTo(L,top);x.lineTo(R,top);x.moveTo(L,bot);x.lineTo(R,bot);
+    if(s[0]===3){x.moveTo(L,Y(0));x.lineTo(R,Y(0))}x.stroke();
+    x.fillStyle=col("--mut");x.textAlign="right";x.fillText(hi.toFixed(s[0]===1?0:1),L-4,top+9);x.fillText(lo.toFixed(s[0]===1?0:1),L-4,bot-1);
+    x.textAlign="left";x.fillText(s[2],R+4,(top+bot)/2+4);
+    x.strokeStyle=col(s[1]);x.beginPath();let on=false;
+    H.forEach(p=>{const v=p[s[0]];if(v===null||v===undefined||p[0]<t0){on=false;return}
+      on?x.lineTo(X(p[0]),Y(v)):x.moveTo(X(p[0]),Y(v));on=true});
+    x.stroke();
+  });
+  x.fillStyle=col("--mut");x.textAlign="left";x.fillText("−10 min",L,h-2);x.textAlign="right";x.fillText("now",R,h-2);
+}
+
+async function poll(){
+  timer=null;
+  try{
+    const r=await fetch("/miv/api/status",{cache:"no-store"});
+    if(!r.ok)throw new Error(r.status);
+    render(await r.json());errs=0;
+  }catch(e){
+    errs++;
+    if(errs>=2){document.body.className="down";$("banner").textContent="ESP32 not reachable ("+e.message+") – retrying"}
+  }
+  if(!document.hidden)timer=setTimeout(poll,errs>=3?5000:1000);
+}
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&!timer)poll()});
+window.addEventListener("resize",draw);
+poll();
+</script>
+</body>
+</html>

@@ -86,6 +86,45 @@ struct be_set_kv {
 
 #define BE_SNAPSHOT_SETTINGS_MAX 96u
 
+/* What only the S32K knows about itself: its CAN controllers, its watchdog and why it last started.
+ * Travels as it is (fixed-width fields only) in the SNAP_S32K section. */
+#define BE_S32K_NUM_CAN 3 /* CAN0, CAN1, CAN4 */
+#define BE_S32K_F_WDT_RUNNING 0x01u
+#define BE_S32K_F_LOCKOUT 0x02u /* contactors held open after 3 watchdog or fault restarts in a row */
+#define BE_S32K_F_CORE 0x04u    /* the Battery-Emulator core runs */
+
+struct be_s32k_can {
+  uint8_t state; /* 0 error-active, 1 error-warning, 2 error-passive, 3 bus-off, 4 stopped */
+  uint8_t tec;
+  uint8_t rec;
+  uint8_t reserved;
+  uint16_t nominal_kbps; /* 0 = stopped */
+  uint16_t data_kbps;    /* 0 = classic CAN */
+  uint32_t rx;
+  uint32_t tx_ok;
+  uint32_t tx_err;
+  uint32_t tx_drops; /* dropped from the transmit queue */
+} __attribute__((packed));
+
+struct be_s32k_status {
+  uint8_t reset_cause;   /* enum be_reset_cause of the S32K, as Modbus register 10 */
+  uint8_t resets_in_row; /* watchdog and fault restarts in a row */
+  uint8_t flags;         /* BE_S32K_F_* */
+  uint8_t reserved;
+  uint16_t outputs;             /* pad levels, bits as Modbus register 226 */
+  uint16_t outputs_after_reset; /* must be 0 */
+  uint32_t uptime_s;
+  uint32_t tick_max_us; /* longest core tick since start */
+  uint32_t rx_drops;    /* received CAN frames dropped before the core saw them */
+  char fw_version[24];
+  struct be_s32k_can can[BE_S32K_NUM_CAN];
+} __attribute__((packed));
+
+#ifdef HW_MIV_S32K
+/* S32K application: fills in the status above for the snapshot */
+void be_s32k_status_fill(struct be_s32k_status* s);
+#endif
+
 /* Hash of the wire layout: HELLO carries it, and the ESP32 refuses a snapshot from a different build. */
 uint32_t be_snapshot_layout_hash(void);
 
@@ -113,6 +152,15 @@ bool be_snapshot_send_step(int (*send)(const void* payload, uint16_t len));
 void be_remote_on_hello(uint8_t flags, uint32_t layout_hash);
 void be_remote_on_snapshot(const uint8_t* payload, uint16_t len);
 bool be_remote_active(void);
+/* ms since the last snapshot part arrived, UINT32_MAX if none since the start */
+uint32_t be_remote_snapshot_age_ms(void);
+/* The settings revision the S32K reported last, false if none yet */
+bool be_remote_settings_revision(uint32_t* rev);
+/* The last SNAP_S32K section, false if none arrived yet */
+bool be_remote_s32k_status(struct be_s32k_status* out);
+/* Odd while a snapshot part is being applied to the datalayer: a reader on another task copies what it
+ * needs and tries again if the count moved (or is odd) */
+uint32_t be_remote_apply_seq(void);
 /* Replaces the local core logic in core_loop while remote */
 void be_remote_tick(uint32_t now_ms);
 #endif
