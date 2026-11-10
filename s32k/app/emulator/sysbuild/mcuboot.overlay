@@ -1,0 +1,7 @@
+/*
+ * MCUboot image of the sysbuild build: the same flash layout as the application. MCUboot's own
+ * app.overlay sets zephyr,code-partition to boot_partition.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+#include "../boards/mcuboot_layout.dtsi"
