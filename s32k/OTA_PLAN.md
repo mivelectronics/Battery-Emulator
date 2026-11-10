@@ -1,223 +1,249 @@
-# S32K312 firmware update over the web page (plan, 09.11.2026)
+# S32K312 firmware update over the web page (plan, version 2, 10.11.2026)
 
-Goal: update the S32K application from the `/miv/update` page of the ESP32, without SWD, with a way back
-when the new image does not come up. SWD stays the way to program the bootloader once.
+Goal: update the S32K application from the `/miv/update` page of the ESP32, without SWD, and get the old
+image back when the new one does not come up. SWD stays the way to program the bootloader once.
 
-Nothing here is built yet. Facts below were checked in the workspace (`zw/`, Zephyr v4.5.0) and in the
-current build (`zw/b/emu_mb`).
+Version 2 follows Dimitar's change of 10.11: the S32K flash is not split in half; the copy of the old,
+working image is kept by an ESP32 with 8 MB of flash. Version 1 (two slots on the S32K) stays here as
+variant 2 for comparison. Nothing is built yet. Facts were checked in the workspace (`zw/`, Zephyr
+v4.5.0, MCUboot in `zw/bootloader/mcuboot`) and in the current build (`zw/b/emu_mb`).
 
-## a) Bootloader: MCUboot
+## Recommendation
 
-**Choice: MCUboot**, built by sysbuild next to the application, in swap mode with test and confirm.
+**Variant 1: MCUboot with one application slot on the S32K, a small firmware loader on the S32K that
+speaks `be_link`, and the image store (current + previous) on the ESP32.** It gives the application
+about 1.7 MB instead of about 900 KB, keeps the NVS settings where they are, and reuses MCUboot for the
+image check. Its price: without an ESP32 there is no update and no way back, and while an image is being
+written the S32K has no application (contactor outputs off). On the 4 MB ESP32 board the same works
+without the stored copy (see "ESP32 flash").
 
-What makes it work without patches:
+## Facts that hold for every variant
 
-- MCUboot is in the workspace (`zw/bootloader/mcuboot`), with mbedTLS; `west` is in `zw/.venv`, so
-  sysbuild (`west build --sysbuild`, `SB_CONFIG_BOOTLOADER_MCUBOOT=y`) is available.
-- The flash has a Zephyr driver: `nxp,c40-flash` (`drivers/flash/flash_mcux_c40.c`), 8 KB erase
-  sectors, 8 byte program unit. NVS already uses it.
-- **Program and erase run from RAM:** in the current image `FLASH_Program`, `FLASH_Erase` and the
-  start-and-wait loops of the C40 HAL sit at 0x2040xxxx (`CONFIG_CODE_DATA_RELOCATION`), with interrupts
-  locked. So code running from a block can write the same block. This is what a swap needs: MCUboot
-  runs from block 0 and rewrites the primary slot in block 0.
-- MCUboot only needs flash partitions in the devicetree: `boot_partition`, `slot0_partition`,
-  `slot1_partition`. They go into our own board (`s32k/boards/nxp/frdm_a_s32k312`), so `zw/zephyr` and
-  `zw/bootloader` stay untouched. MCUboot settings go into `sysbuild/mcuboot.conf` and
-  `sysbuild/mcuboot.overlay` of the application.
-- No in-tree board of the MCX E31x family uses MCUboot yet, so this is a first. Nothing in MCUboot is
-  specific to the SoC except the flash driver and the jump to the application (Cortex-M7, generic).
+- MCUboot, mbedTLS and `west` are in the workspace; sysbuild builds bootloader + images together. All
+  configuration goes into our board and application directories; `zw/zephyr` and `zw/bootloader` stay
+  untouched.
+- The C40 flash has a Zephyr driver (`nxp,c40-flash`, 8 KB sectors, 8 byte program unit). In the current
+  image `FLASH_Program`, `FLASH_Erase` and their wait loops run from RAM (0x2040xxxx) with interrupts
+  locked, so code can write the flash block it runs from.
+- No in-tree MCX E31x board uses MCUboot yet: this is a first. Nothing in MCUboot is specific to the SoC
+  except the flash driver and the jump to the application.
+- The S32K3 boot header (IVT) moves from the application to the bootloader at 0x400000; the application
+  builds without it (`BOARD_NXP_MCXE31X_BOOT_HEADER=n`).
+- The MPU map of `be_mpu.c` (speculative access hang, ERR011573) goes into the bootloader and the loader
+  as a small Zephyr module through sysbuild, not as a patch.
+- Image today: `emu_mb` 712 488 B, `emu_sim` 714 640 B.
 
-Mode: **swap using move** (or swap using offset, both in this MCUboot): the new image goes to slot 1 as
-a test image; MCUboot swaps it in at the next start; the application confirms itself
-(`boot_write_img_confirmed()`) once it is healthy. A start that does not confirm (reset, watchdog, power
-loss) makes MCUboot swap the old image back. MCUboot resumes an interrupted swap after a power loss.
+## Variant 1 (recommended): one slot on the S32K, store on the ESP32
 
-Image check: **SHA-256 in the image trailer from the start** (`BOOT_SIGNATURE_TYPE_NONE`), **ECDSA P-256
-signature as a later step** (decision 1 below).
+### S32K flash layout (2000 KB usable)
 
-Risks found, with what to do about them:
+| Partition | Offset | Size | Content |
+|---|---|---|---|
+| boot_partition | 0x000000 | 64 KB | MCUboot + boot header |
+| loader_partition | 0x010000 | 128 KB | firmware loader (Zephyr, `be_link`, flash writer) |
+| slot0 | 0x030000 | 1744 KB (0x1B4000) | the application |
+| storage (NVS) | 0x1E4000 | 64 KB | **same place as now**: settings survive |
+| (HSE firmware) | 0x1F4000 | 48 KB | untouched |
 
-1. **Boot header (IVT).** Today the application carries the S32K3 boot header at 0x400000
-   (`BOARD_NXP_MCXE31X_BOOT_HEADER=y`, code partition from 0x100). With MCUboot the boot header goes with
-   the bootloader at 0x400000, and the application turns it off (`=n` in its configuration).
-2. **Speculative access hang (ERR011573, `be_mpu.c`).** The bootloader is a different binary and can
-   hit the same stop. The MPU map of `be_mpu.c` goes into the bootloader as a small Zephyr module
-   (`SYS_INIT`) added to the MCUboot image through sysbuild, not a patch of MCUboot.
-3. **Resets.** Destructive resets left this chip dead before (FIRMWARE_PLAN section 6); the application
-   already uses functional resets, and MCUboot only runs after them. To check on the board in step 1.
-4. **Console.** MCUboot logs on LPUART6, which is the Modbus port of the `emu_mb` test build: its log
-   is turned off in that variant.
+Largest application: about **1.7 MB** (slot minus MCUboot header and trailer), against 712 KB today.
+The loader is a separate, small image (estimate 50–80 KB) built from our code; MCUboot itself about
+25–35 KB.
 
-**Watchdog from the bootloader on.** A test image that hangs before it starts SWT0 would never reset,
-so there would be no way back. Therefore MCUboot starts SWT0 itself and it stays on into the
-application:
+### Boot flow
 
-- MCUboot lets the watchdog be replaced through two weak functions, `mcuboot_watchdog_setup()` and
-  `mcuboot_watchdog_feed()` (`BOOT_WATCHDOG_SETUP_AT_BOOT`, `BOOT_WATCHDOG_FEED`). Our small module (the
-  same one that carries the MPU map) implements them on the SWT0 registers, like `be_wdt.c` does, not
-  through the Zephyr SWT driver.
-- Timeout **10 s**, fed by MCUboot between the sector steps of a swap (`MCUBOOT_WATCHDOG_FEED()` is
-  called there), so a swap of any length is covered, and a swap that stops is reset.
-- The application finds SWT0 already running: `be_wdt_start()` unlocks it, sets its own 500 ms and its
-  two stages as today. Between the jump and `be_wdt_start()` the 10 s of the bootloader apply. A hang in
-  that time resets the chip, the image is not confirmed, MCUboot swaps the old one back.
-- Not locked (no hard lock), so the application can reconfigure it. The freeze-in-debug bit stays set
-  as today, so SWD debugging still works.
+MCUboot starts first after every reset and decides (MCUboot options `SINGLE_APPLICATION_SLOT` and
+`BOOT_FIRMWARE_LOADER`):
 
-Fallback if MCUboot fails on this part: an own bootloader of about 300 lines with the same layout
-(length + magic + CRC32/SHA-256, then jump). "Pick the slot" without a swap needs every image built
-twice, once for each slot address; "copy slot 1 over slot 0" is simple but has no way back. Only if
-step 1 shows a blocker.
+1. **Loader requested:** the application left a "stay in loader" mark in retained RAM before it
+   restarted (`BOOT_FIRMWARE_LOADER_BOOT_MODE`; 256 bytes of the standby RAM at the start of SRAM,
+   kept over a functional reset, as `__noinit` data is today) → start the loader.
+2. **No valid application:** the SHA-256 of slot 0 does not match its trailer, or the slot is empty
+   (`BOOT_FIRMWARE_LOADER_NO_APPLICATION`) → start the loader.
+3. **Too many failed starts:** an image access hook of MCUboot (`BOOT_IMAGE_ACCESS_HOOKS`, our code)
+   counts starts in retained RAM; the application clears the count when it confirms itself. Three
+   starts without a confirm → the hook reports the application as not bootable → loader. This catches
+   an image that passes the hash but hangs or resets.
+4. Otherwise → start the application.
 
-## b) Flash layout (2000 KB usable, two blocks)
+The loader announces itself on the link (HELLO with role "loader", the reason 1/2/3 and the version
+found in slot 0). It configures **no output pins**: the contactor and BMS outputs stay as the reset
+left them (output drivers off, the pull-downs on the board hold the drivers off). It sends nothing on
+CAN, so a Kona opens its own contactors.
 
-Code flash: block 0 = 0x400000–0x4FFFFF (1024 KB), block 1 = 0x500000–0x5F3FFF (976 KB usable; the last
-48 KB belong to the HSE firmware and stay untouched).
+### Update flow
 
-| Partition | Offset | Size | Block | Now |
+1. The browser sends the new image to the ESP32 (`/miv/api/s32k/ota/*`, 4 KB pieces, as in version 1).
+2. **The ESP32 stores it** in its free S32K store slot and checks it there: MCUboot magic, size ≤ the
+   S32K slot, board id TLV, SHA-256. Nothing has touched the S32K yet; a bad file stops here.
+3. The ESP32 asks the application to enter the loader (`BE_CMD_ENTER_LOADER`). The application refuses
+   unless the safety conditions hold (below); otherwise it sets the loader mark and restarts.
+4. The loader erases slot 0 and takes the image from the ESP32 block by block (`BE_LINK_OTA` DATA with
+   ack, one block in flight), then checks the SHA-256 and restarts.
+5. MCUboot finds a valid image and starts it. The application confirms itself (criteria below); the
+   ESP32 sees the confirm in HELLO/status and marks its stored copy **current**; the copy before
+   becomes **previous**.
+
+Expected time for 712 KB: storing on the ESP32 ≈ 5 s, erase of slot 0 ≈ 89 × 50 ms ≈ 4.5 s (or
+erase as the write goes), transfer ≈ 6–8 s → **about 20 s** with no application on the S32K for about
+15 s of it.
+
+### Way back: the S32K asks, the ESP32 sends
+
+- **When:** the loader is started for reason 2 (no valid image: power lost during a write, wrong hash)
+  or reason 3 (three starts without a confirm: the image hangs, resets or never sees the link).
+- **Who decides:** the S32K reports the reason; the ESP32 decides what to send: the **previous**
+  copy after a failed new image, the **current** copy after a lost write of an image that had worked.
+  It does so on its own, without the browser, and writes an event.
+- **Power lost in the middle of the write:** slot 0 is half written; MCUboot sees a wrong hash → loader
+  → the ESP32 sends the image again. Until then there is no application; outputs stay off, no CAN.
+- **Power lost on the ESP32 side during the transfer:** the same, as soon as the ESP32 is back.
+
+### Without an ESP32
+
+There is no update without the ESP32 anyway (the image comes through it). The risk is narrower: **an
+update that fails while the ESP32 is gone, or an ESP32 that dies during the update, leaves the S32K in
+the loader**, with outputs off and no CAN, until an ESP32 or SWD brings an image. A running emulator
+never depends on the ESP32 (variant A+ holds); only the minute of an update does.
+
+My view: acceptable, because the S32K is then in a safe state (contactors open), the loader says so on
+the link and in its LED pattern, and the store on the ESP32 brings it back without a browser as soon as
+the ESP32 is there. If that is not acceptable for a site, variant 3 below keeps a copy on the S32K too.
+
+### ESP32 flash
+
+**8 MB (the ESP32 board Dimitar will attach, and the ESP32-S3-WROOM-1-N8R2 of the MIV board):**
+
+| Name | Type | Offset | Size | Note |
 |---|---|---|---|---|
-| boot_partition (MCUboot + boot header) | 0x000000 | 64 KB | 0 | IVT 0x100 + code |
-| slot0 (running image) | 0x010000 | 920 KB (0xE6000) | 0 | code |
-| spare | 0x0F6000 | 40 KB | 0 | code |
-| slot1 (new image) | 0x100000 | 912 KB (0xE4000) | 1 | code |
-| storage (NVS) | 0x1E4000 | 64 KB | 1 | **same as now** |
+| nvs | data/nvs | 0x9000 | 20 KB | same as now |
+| otadata | data/ota | 0xE000 | 8 KB | same as now |
+| app0 | app/ota_0 | 0x10000 | 2304 KB (0x240000) | ESP32 firmware, today 1.95 MB |
+| app1 | app/ota_1 | 0x250000 | 2304 KB | |
+| coredump | data/coredump | 0x490000 | 64 KB | |
+| s32k_a | data/0x40 | 0x4A0000 | 1728 KB (0x1B0000) | S32K image store |
+| s32k_b | data/0x40 | 0x650000 | 1728 KB | S32K image store |
 
-- Swap using move needs the primary slot one sector bigger than the secondary: 920 = 912 + 8 KB.
-- **Largest image: about 900 KB** (912 KB minus header and trailer). Today: `emu_mb` 712 488 B,
-  `emu_sim` 714 640 B → **about 190 KB (26 %) of room**. The code partition today is 1936 KB, so the
-  image limit drops to less than half: that is the price of a way back.
-- The NVS partition does not move, so the settings survive the update. MCUboot never touches it.
-- 115 and 114 sectors in the two slots: within MCUboot's default of 128 (`BOOT_MAX_IMG_SECTORS`).
-- MCUboot itself: about 25–35 KB with SHA-256 only, about 45 KB with ECDSA; 64 KB leaves room.
+- Two S32K copies: **current** and **previous**; a new image always goes into the slot that is not
+  current, so the working image is never overwritten by a transfer.
+- Each store slot starts with a 4 KB header of our own: magic `S32KIMG1`, header version, image size,
+  SHA-256 of the image, version text (from the MCUboot header), state (empty / written / verified /
+  current / previous), a counter that orders the two, and a CRC-32 of the header. The image follows at
+  4 KB. The image keeps its own MCUboot hash; the ESP32 checks it before and after the transfer.
+- Largest S32K image the store takes: 1724 KB, just under the S32K slot (1744 KB). The ESP32 app slots
+  have 2.3 MB: room for the ESP32 firmware to grow too.
 
-## c) Path of the image: browser → ESP32 → S32K
+**4 MB (ESP32ETH_8R8I, `miv_4MB.csv`, stays as it is):** no room for a store. The image is streamed
+from the browser through to the loader without a copy. What it loses: the automatic way back (after a
+failed image the S32K waits in the loader until a good image is sent again from the page) and the
+re-send after a lost write without the browser. Good enough for the bench; not for a site.
 
-**Room on the ESP32:** none to spare. The only free space is the inactive OTA slot of the ESP32
-(0x1F0000), and it is the rollback image of the ESP32 itself (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`).
-**So: streaming, no copy on the ESP32.**
+## Variant 2: two slots on the S32K (version 1 of this plan)
 
-1. The `/miv/update` view gets a second field, "S32K firmware" (`zephyr.signed.bin`). The browser
-   reads the file, takes its SHA-256 and sends it in 4 KB pieces:
-   - `POST /miv/api/s32k/ota/begin` (size, SHA-256, version text) → the ESP32 checks the conditions of d)
-     and sends BEGIN over the link;
-   - `POST /miv/api/s32k/ota/chunk?offset=N` (4 KB body) → accepted when the previous piece is confirmed
-     by the S32K, else 409 with the confirmed offset: the browser goes on from there;
-   - `GET /miv/api/s32k/ota/state` → state, confirmed bytes, error text (the progress bar);
-   - `POST /miv/api/s32k/ota/finish` → the S32K checks the SHA-256 of the whole slot, marks it as a test
-     image and restarts after 2 s.
-2. Link (`be_link.h`): the message type `BE_LINK_OTA = 9` is already reserved. Sub-messages BEGIN,
-   DATA (offset + up to 1000 bytes; the frame already has a CRC-16), FINISH, ABORT. The S32K answers
-   every one with `BE_LINK_ACK` (status + offset). The ESP32 sends the next block only after the ack and
-   repeats a block that was not acknowledged within 200 ms (like the settings today).
-3. On the S32K, in the main thread: erase a sector when the write reaches it, write, read back. Every
-   sector erase locks the interrupts for 40–50 ms (measured with NVS), so the protocol must never have
-   more than one block in flight: the link RX buffer then never overflows.
-4. Expected time for 712 KB: erase 89 × ~50 ms ≈ 4.5 s, transfer at 2 Mbit/s with one block in flight
-   ≈ 6–8 s, HTTP pieces ≈ 3 s → **about 15–20 s**, then the swap at start (estimate 5–10 s, measured in
-   step 1).
-5. **Confirming the new image, the same for every configuration** (battery type 0 included, where the
-   core does not run). The image confirms itself when all of these hold:
-   - the main thread is alive (it feeds the watchdog);
-   - the settings were read from NVS without an error;
-   - the link to the ESP32 is up (HELLO received from it);
-   - 60 s have passed since the start without a watchdog or fault reset.
+MCUboot in swap mode with test and confirm: the new image goes to slot 1, MCUboot swaps it in, the image
+confirms itself, an image that does not confirm is swapped back at the next start.
 
-   The link is in the list on purpose: an image with a broken link could never be updated again over
-   the web. Until it is confirmed the status shows "S32K: test image, not confirmed". `s32k_fw` in
-   `/miv/api/status` shows the version (the version text grows a build id).
-6. **No ESP32 after the restart.** If the link does not come up within **5 minutes**, the new image
-   restarts itself without confirming, and MCUboot puts the old image back. Before BEGIN the S32K
-   writes "update to version X pending" into NVS; the old image, finding that marker with its own,
-   different version, reports "update reverted" (event and status) and clears it. An update is always
-   started from the ESP32, so the ESP32 was there a minute before; if it is really gone, running the
-   proven old image is the safe side.
-7. **BEGIN carries the first 32 bytes of the image** (the MCUboot header). The S32K refuses the update
-   unless:
-   - the magic is MCUboot's (`0x96f3b83d`): an ESP32 file starts with `0xE9` and fails here;
-   - header + image + trailer fit in slot 1 (912 KB);
-   - the image has no load address and no encryption flags.
+| Partition | Offset | Size |
+|---|---|---|
+| boot_partition | 0x000000 | 64 KB |
+| slot0 | 0x010000 | 920 KB |
+| spare | 0x0F6000 | 40 KB |
+| slot1 | 0x100000 | 912 KB |
+| storage (NVS) | 0x1E4000 | 64 KB |
 
-   At FINISH, before the image is marked, more checks that cost nothing:
-   - the vector table at the start of the image points into slot 0 (reset handler) and into RAM
-     (stack);
-   - a board id TLV (imgtool `--custom-tlv`, our own tag 0xA0) equals the board's id, for example
-     `frdm_a_s32k312` or later the MIV board: an image of another board is refused;
-   - the SHA-256 of the whole image matches the hash TLV.
+Largest application about **900 KB**. Works without any ESP32 for the way back; the S32K always has a
+working application. No changes on the ESP32 flash.
 
-   The ESP32 makes the first check too, before it sends anything, so a wrong file is refused at once on
-   the page.
-8. **The link is quiet during an update, apart from the update itself.** The S32K receives with DMA into
-   2 × 512 bytes; while a sector is erased the interrupts are locked for 40–50 ms and only about
-   1 KB more can come in. So:
-   - the ESP32 sends exactly one OTA frame and waits for its ack;
-   - the S32K erases only after the whole frame is in and before it acks, so no frame of the update is
-     on the wire during an erase;
-   - the ESP32 holds back everything else: settings, commands, the live battery settings, and the CAN
-     frames of bridge mode. The queue (`out_pump` in `be_snapshot.cpp`) waits and goes on after the
-     update. Only the 1 s HELLO (under 40 bytes) still goes out;
-   - the S32K refuses any other message while an update runs, and stops its own snapshot and CAN
-     traffic (the core is stopped).
+## Variant 3: two slots on the S32K and a copy on the ESP32
 
-The same commands are reachable without the web page (step 2): a small script on the PC through the
-ESP32, so the S32K side is tested before the page exists.
+Variant 2 plus the store of variant 1 on the 8 MB ESP32. Only gives something over variant 2 when the
+copy on the S32K is lost too, which MCUboot's swap already makes unlikely. It keeps the 900 KB limit,
+which is what Dimitar wants to avoid. **Not recommended.**
 
-## d) Safety
+## Comparison
 
-- BEGIN is refused unless: the contactor outputs of the S32K are all off (Modbus 226 bits 0–3 = 0),
-  `contactors_engaged` is 0, the emulator is paused (charge and discharge limits 0) and the measured
-  current is below 1 A. The page says which condition failed.
-- On BEGIN the S32K stops the core: no CAN to the battery and inverter. A Kona opens its own contactors
-  when the vehicle frames stop. The outputs stay off until the restart.
-- The watchdog stays on. While an update runs it only asks for the main thread (the core is stopped on
-  purpose); erases are one sector at a time, 40–50 ms, well under its 500 ms.
-- No writes to NVS during the update; the NVS partition is outside both slots.
-- Any link silence over 10 s, ABORT, or a wrong SHA-256 at FINISH: slot 1 is left unmarked, the S32K
-  restarts into the old image with the core as configured.
-- Never a write while the contactors are closed: the check is on the S32K itself, not only in the page.
-- **Web access.** `/miv/api/s32k/ota/*` sits behind the same global middleware of the server as the
-  upstream pages and `/ota`: the web password when it is on, otherwise local network only. One trap,
-  known from ElegantOTA: the body of an upload arrives in the body callback before the middleware
-  decides. So the chunk handler checks `webserver_request_authorized()` itself before it passes a single
-  byte on, as `/ota/upload` does, and the request is then answered 401/403 by the middleware.
+| | Variant 1 | Variant 2 | Variant 3 |
+|---|---|---|---|
+| Largest S32K image | ~1.7 MB | ~900 KB | ~900 KB |
+| Way back without an ESP32 | no | yes | yes |
+| S32K without an application during an update | ~15 s, outputs off | never | never |
+| Works with the 4 MB ESP32 | yes, no way back | yes | as variant 2 |
+| Parts | MCUboot + loader + hook + ESP32 store | MCUboot | all of them |
+| Work (days) | 9–11 | 6–9 | 11–13 |
 
-## e) Programming and tests with the new layout
+## Rules for every variant (from the review of version 1)
 
-- Once per board through SWD: the bootloader (`build/mcuboot/zephyr/zephyr.elf`, has the boot header)
-  and the application (`build/emulator/zephyr/zephyr.signed.hex`). `flash_pe.sh` takes the hex as it
-  takes an ELF (gdb `load`), so it only needs the new path; a `--app-only` call loads only slot 0.
-- Development keeps SWD for speed: build directories become sysbuild ones (`zw/b/emu_mb/emulator/...`),
-  `run_s32k_tests.sh` points at the signed hex of each variant. A SWD load writes slot 0 directly and
-  marks it confirmed (`--confirm` of imgtool), so no swap happens after it.
-- To check in step 1: whether a PEmicro load still wipes the NVS (seen before with changed images). If
+1. **Watchdog from the bootloader on.** MCUboot starts SWT0 through its replaceable
+   `mcuboot_watchdog_setup()` / `mcuboot_watchdog_feed()` (our module, SWT0 registers like `be_wdt.c`),
+   10 s, fed between the steps of long flash work. It stays on into the loader (which feeds it) and the
+   application (`be_wdt_start()` unlocks it and sets its own 500 ms). An image that hangs before
+   `be_wdt_start()` is reset after 10 s and counted as a failed start (variant 1) or not confirmed
+   (variant 2). Not hard locked; freeze in debug stays on.
+2. **Confirm, the same for every configuration** (battery type 0 included): main thread alive, settings
+   read from NVS without an error, link to the ESP32 up (HELLO received), 60 s since the start without a
+   watchdog or fault reset. Variant 1: the confirm clears the start count and is reported to the ESP32.
+   Variant 2: `boot_write_img_confirmed()`. No link within 5 minutes → restart without a confirm
+   (variant 2: MCUboot swaps back; variant 1: counts as a failed start). Before an update the S32K
+   writes "update to version X pending" to NVS, so the image that runs afterwards knows whether it is
+   the new one or the old one back, and reports "update reverted".
+3. **Checks of the file** before anything is written: MCUboot magic `0x96f3b83d` (an ESP32 file starts
+   with `0xE9`), size within the slot, no load address or encryption flags, vector table pointing into
+   the application slot and into RAM, board id TLV (imgtool `--custom-tlv`, tag 0xA0) equal to the
+   board's, SHA-256 of the image. The ESP32 checks first and refuses on the page; the S32K (loader or
+   application) checks again.
+4. **The link is quiet during an update.** The S32K receives with DMA into 2 × 512 bytes; erasing a
+   sector locks the interrupts for 40–50 ms. So: one OTA frame in flight, erase only after a whole
+   frame is in and before its ack, nothing else from the ESP32 (settings, commands, live battery
+   settings, bridge CAN frames wait in the queue of `be_snapshot.cpp`), only the 1 s HELLO; the S32K
+   refuses other messages and sends no snapshot or CAN while the update runs.
+5. **Web access.** `/miv/api/s32k/ota/*` sits behind the same global middleware as the upstream pages
+   and `/ota` (web password, or local network only). The chunk body arrives before the middleware
+   decides, so the chunk handler calls `webserver_request_authorized()` itself, as `/ota/upload` does.
+
+## Safety
+
+- The update is refused by the S32K itself unless: the contactor outputs are off (Modbus 226 bits 0–3),
+  `contactors_engaged` is 0, the emulator is paused (limits 0) and the current is below 1 A. The page
+  says which condition failed.
+- From the request on, the core is stopped: no CAN to battery and inverter; outputs off until an
+  application runs again.
+- Nothing writes NVS during the update; the NVS partition is outside every slot.
+- Link silence over 10 s, ABORT or a wrong hash: variant 1 stays in the loader and asks the ESP32
+  again; variant 2 leaves slot 1 unmarked and restarts into the old image.
+
+## Programming and tests
+
+- Once per board through SWD: MCUboot, the loader (variant 1) and the application
+  (`zephyr.signed.hex`, written to slot 0 as a confirmed image). `flash_pe.sh` takes hex files as it
+  takes an ELF; it gets the new paths and an `--app-only` mode.
+- Development keeps SWD for speed; sysbuild build directories (`zw/b/emu_mb/emulator/...`) and
+  `run_s32k_tests.sh` point at the signed hex of each variant.
+- To check in step 1: whether a PEmicro load still wipes the NVS (seen with changed images before). If
   so, the script loads by address range.
 
-## Steps and estimate
+## Steps and estimate (variant 1)
 
 | Step | What | Days |
 |---|---|---|
-| 1 | Partitions in the board, sysbuild with MCUboot, MPU module in the bootloader, application without boot header; on the board: start through MCUboot, an image put into slot 1 through SWD swaps in, without confirm swaps back, settings survive | 2–3 (+1–2 if MCUboot needs work on this part) |
-| 2 | Link messages BEGIN/DATA/FINISH/ABORT with acks, writer on the S32K, checks of d), confirm logic, a PC script through the ESP32 | 2–3 |
-| 3 | `/miv/api/s32k/ota/*` on the ESP32 and the second field in the Update view, progress | 1 |
-| 4 | On the boards: full cycle; broken image (wrong hash, ESP32 file, image of another board id) refused; image that hangs in its very first lines (before `be_wdt_start`) → reset by the bootloader's watchdog and back to the old one; image with a broken link → not confirmed, back after 5 min; ESP32 off after the restart; power off during transfer and during the swap; update refused with contactors closed and without the web password | 1–2 |
-| | **Total** | **about 6–9 working days** |
+| 1 | Partitions; sysbuild with MCUboot (single slot, firmware loader, boot-mode retention, image access hook with the start count); watchdog + MPU module; the loader: `be_link` receiver and flash writer; application without boot header. On the board with SWD: start through MCUboot, enter the loader on request, write slot 0 from a PC script through the loader, three failed starts → loader | 3–4 (+1–2 if MCUboot needs work on this part) |
+| 2 | ESP32 8 MB: partition table and environment (the ESP32 board with 8 MB, later the S3), the two store slots with their header, the transfer to the loader, the way back on its own; a PC script through the ESP32 | 3 |
+| 3 | `/miv/api/s32k/ota/*` and the second field "S32K firmware" in the Update view, progress, state of the store (current / previous versions) | 1 |
+| 4 | On the boards: full cycle; wrong file, ESP32 file and other board id refused; image that hangs in its first lines → back to previous; image with a broken link → back; power off during the write (S32K and ESP32 separately); refused with contactors closed and without the web password; the 4 MB board without a store | 2 |
+| | **Total** | **about 9–11 working days** |
 
 A commit (no push) after every step, with measurements.
 
 ## Not included
 
-- Production signing keys and their storage (decision 1).
-- Updating MCUboot itself over the link (stays SWD).
-- Encrypted images, the HSE, downgrade protection.
-- Updating the ESP32 from the S32K, or the S32K over Modbus/RS485 without the ESP32.
-- The new MIV board (TJA1448A, ESP32-S3): the same plan applies, its layout is checked when the board
-  exists.
+- Production signing keys (decision 1); updating MCUboot or the loader over the link (SWD only);
+  encrypted images, the HSE, downgrade protection; updating the S32K over Modbus/RS485 without an
+  ESP32; updating the ESP32 from the S32K.
 
 ## Decisions for Dimitar
 
-1. **Signature.** SHA-256 only is enough against broken transfers, not against someone who can reach
-   the web page. ECDSA P-256 needs a private key kept out of the public repository. The firmware is
-   GPL-3.0: if the product refuses images not signed by MIV, GPL-3.0 asks to give users a way to install
-   their own builds (their own key or an unlock). Proposal: SHA-256 now, ECDSA with a documented way for
-   users before the first delivery.
-2. **Image limit of about 900 KB** instead of 1936 KB. Enough for now (712 KB); the new board's S32K
-   has the same flash.
+1. **Signature:** SHA-256 now (protects against broken transfers, not against someone who can reach the
+   page); ECDSA P-256 with the key outside the public repository before the first delivery. GPL-3.0:
+   if the product refuses images not signed by MIV, users must get a way to install their own builds.
+2. **Variant 1** with its condition: without an ESP32 a failed update leaves the S32K waiting in the
+   loader (outputs off). Or variant 2 with the 900 KB limit and no such condition.
+3. **The 8 MB ESP32 board** for the bench: which board is it (module, pins of the W5500 and of the UART
+   to the S32K)? It needs its own environment until the MIV board with the S3 exists.
