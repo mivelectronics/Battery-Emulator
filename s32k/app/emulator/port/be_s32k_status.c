@@ -9,6 +9,7 @@
 
 #include "be_core.h"
 #include "be_gpio.h"
+#include "be_ota.h"
 #include "be_snapshot.h"
 #include "be_wdt.h"
 #include "can_io.h"
@@ -23,7 +24,8 @@ void be_s32k_status_fill(struct be_s32k_status *s)
 	s->resets_in_row = (uint8_t)MIN(be_wdt_resets_in_row(), 0xFF);
 	s->flags = (be_wdt_running() ? BE_S32K_F_WDT_RUNNING : 0) |
 		   (be_wdt_contactors_locked_out() ? BE_S32K_F_LOCKOUT : 0) |
-		   (be_core_active() ? BE_S32K_F_CORE : 0);
+		   (be_core_active() ? BE_S32K_F_CORE : 0) |
+		   (be_ota_image_state() == BE_IMAGE_TEST ? BE_S32K_F_TEST_IMAGE : 0);
 	s->outputs = be_gpio_levels();
 	s->outputs_after_reset = be_gpio_outputs_after_reset();
 	s->uptime_s = (uint32_t)(k_uptime_get() / 1000);

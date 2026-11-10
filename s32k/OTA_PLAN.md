@@ -50,44 +50,41 @@ Block 0 = 0x400000–0x4FFFFF, block 1 = 0x500000–0x5F3FFF; the last 48 KB bel
 
 ## 3. Flash budget
 
+Measured on 10.11.2026 after the two savings below (A and B of the order in section 10):
+
 | | KB |
 |---|---|
 | Slot 1, the smaller slot | 912 |
-| MCUboot header in front of the image (vector table alignment) | −1 |
-| Trailer: hash TLV and swap status (≈ 115 sectors × 3 × 8 B + magic), one sector reserved | −8 |
-| **Largest image** | **≈ 903** |
-| Image today (`emu_mb`, 712 488 B) | 696 |
-| Update support in the application (link messages, slot writer, confirm logic) | +10–15 |
+| MCUboot header in front of the image (4 KB: under MCUboot `ROM_START_OFFSET` is the SoC's 0x1000) | −4 |
+| Trailer: hash TLV and swap status, one sector reserved | −8 |
+| **Largest image** | **≈ 900** |
+| Image now (`ota_mb`, application under MCUboot, 542 100 B) | 529 |
+| Update support still to come (link messages, slot writer) | +10–15 |
 | Two batteries as two BMSs (`DUAL_BATTERY_PLAN.md`) | +10–20 |
-| **Expected after both** | **≈ 716–731** |
-| **Room left** | **≈ 170–185 KB (19–20 %)** |
+| **Expected after both** | **≈ 550–565** |
+| **Room left** | **≈ 335–350 KB (37–39 %)** |
 
-Upstream grows mostly by battery drivers: 65 battery files make about 312 KB today, about 5 KB per
-battery on average, factory code included. At 5–10 new batteries a year that is 25–50 KB a year: the
-room lasts for years, and the savings below are ready when it does not.
+MCUboot itself: 36 024 B of its 64 KB partition (with the MPU map and the SWT0 hooks).
 
-**Where the image goes today** (from `zw/b/emu_mb/zephyr/zephyr.map`, without a new build; the sum of
-the map lines is 12 % above the image, so the numbers are scaled by 0.88):
+**Savings done (10.11.2026):**
 
-| Group | KB | Share |
+| | `emu_mb` bytes | |
 |---|---|---|
-| Battery drivers (65 files) | ≈ 312 | 44 % |
-| of which the factory `BATTERIES.cpp` (constructors of every battery inlined into it) | ≈ 106 | |
-| of which HTML renderers of the battery pages (4 files) | ≈ 26 | |
-| C++ library (`libstdc++`, mostly locale and string instances) | ≈ 116 | 16 % |
-| Rest of our port and upstream core (datalayer, safety, communication, UDS) | ≈ 129 | 18 % |
-| Zephyr | ≈ 56 | 8 % |
-| Inverter drivers (26 files) | ≈ 51 | 7 % |
-| C library, NXP HAL, gcc runtime | ≈ 45 | 6 % |
+| Before | 712 488 | |
+| A. Battery HTML renderers left out of the S32K build (`*-HTML.cpp`, generated empty stand-ins) | 688 864 | −23 624 |
+| B. Floats in the `String` stand-in of our port (`port/WString.h`) formatted without `std::ostringstream` / `std::to_string(float)`, which pulled the iostream, stringstream and locale parts of `libstdc++` | 539 852 | −149 012 |
+| **Total** | | **−172 636 (−24 %)**; RAM −4.6 KB |
 
-**Savings when needed** (rough, before a build proves them):
+B was entirely in our port, no upstream code involved. Side effects: `String(float)` now has Arduino's
+2 decimals (it had 6), and `String(value, HEX)` / `String(value, 16)` print the number in that base, as
+on Arduino (before, the integer went to the float constructor and came out with 16 decimals). The C
+library of this build has no float support in `printf`, so the stand-in formats with integers.
 
-| Way | Saves | Cost and risk |
-|---|---|---|
-| Leave out the battery HTML renderers on the S32K (the pages live on the ESP32) | ≈ 20–26 KB | Our CMake list plus empty stand-ins; no upstream change |
-| Find what pulls the locale parts of `libstdc++` (a `stringstream` or `std::to_string` somewhere) and replace it in our port | up to 50–100 KB, to measure | Small if the user is in our code; a patch if it is in upstream code |
-| Build only chosen batteries and inverters: a factory generated at build time from upstream's `BATTERIES.cpp` / `INVERTERS.cpp` | a dozen common batteries and inverters: ≈ 150 KB; Kona + Pylon only: ≈ 300 KB | The generator follows upstream's file; batteries not built cannot be chosen on site |
-| Turn asserts off | 5–15 KB | Not recommended: they feed the fault path of the watchdog |
+**Left as options:** the battery page HTML that sits inline in upstream headers and the
+`get_uds_info_html()` methods of the battery drivers (about 55 KB of code plus strings) cannot be left
+out by file: that would need the symbols weakened after compiling and replaced at link time, a trick
+in our CMake, or upstream changes. A factory generated with only chosen batteries and inverters would
+save about 150–300 KB more. Not needed now.
 
 ## 4. The update path (works with every ESP32)
 
@@ -185,14 +182,25 @@ the two "install" buttons are missing (the page asks for the file again).
 
 ## 8. Programming and tests
 
-- Once per board through SWD: MCUboot (`build/mcuboot/zephyr/zephyr.elf`, with the boot header) and the
-  application (`build/emulator/zephyr/zephyr.signed.hex`, written to slot 0 as a confirmed image, so no
-  swap follows). `flash_pe.sh` takes hex files as it takes an ELF; it gets the new paths and an
-  `--app-only` mode.
-- Development keeps SWD; sysbuild build directories (`zw/b/emu_mb/emulator/...`) and
-  `run_s32k_tests.sh` point at the signed hex of each variant.
-- To check in step 1: whether a PEmicro load still wipes the NVS (seen with changed images before). If
-  so, the script loads by address range.
+- Build: `s32k/tools/build_ota.sh mb|prod|sim` (sysbuild into `zw/b/ota_<variant>`; MCUboot +
+  application; `sysbuild.conf`, `sysbuild/mcuboot.conf|overlay`, `mcuboot_app.conf|overlay` and the
+  module `s32k/modules/miv_boot`). The plain builds (`zw/b/emu*`, no MCUboot) stay as they are for the
+  simulator suite.
+- Images: `s32k/tools/ota_images.py <build> full [--slot1-version V]` writes `full.hex` = MCUboot +
+  slot 0 (+ a test image in slot 1), loaded through SWD in one go (`flash_pe.sh` with the hex). An image
+  in slot 0 without a trailer is confirmed by the application itself at start (an SWD load has no
+  trailer), so no swap follows an SWD load. `ota_images.py <build> bin --version V` signs the image
+  that goes over OTA.
+- A PEmicro load wipes the NVS (checked again in step 1), so `full.hex` carries everything in one load.
+- Debugging under MCUboot: breakpoints in the application hit only after the debugger has stopped once
+  in MCUboot (set `main` of MCUboot first); a load and the trace in one gdb session (a separate load
+  lets a looping image use up the chip's reset escalation before gdb attaches).
+- Hand-over trap of this chip (found in step 1): MCUboot leaves the core on the PLL, and the clock driver
+  of the application switches FXOSC and the PLL off to set them up again, which stops the core. The
+  board hook (`boards/nxp/frdm_a_s32k312/board.c`) moves the core to FIRC and powers the PLL down
+  first; after a reset it does nothing. MCUboot also turns the reset escalation off (`miv_boot`), and
+  the application keeps MCUboot's SWT0 running until `be_wdt_start()` (`DISABLE_WDOG=0` only in the
+  MCUboot build).
 
 ## 9. Steps and estimate
 
@@ -208,6 +216,17 @@ the two "install" buttons are missing (the page asks for the file again).
 
 A commit (no push) after every step, with measurements. Step 5 can wait without blocking anything
 before it.
+
+## 10. Order of work (Dimitar, 10.11.2026)
+
+| | What | State |
+|---|---|---|
+| A | Battery HTML renderers out of the S32K build | 6d1d1ec4, −23 624 B; core (53) and Modbus (18) checks pass; the 212 with the ESP32 not run yet |
+| B | What pulled the stream/locale parts of `libstdc++`: our `port/WString.h` | 117ee234, −149 012 B; same checks |
+| C | Steps 1–3 on the FRDM (MCUboot with two slots; link protocol and slot writer; web part) | step 1 done on the FRDM (MCUboot 36 KB, image 542 KB): start through MCUboot; test image from slot 1 swapped in (register 18 = 2); without the link not confirmed, restart after 5 min and swapped back (18 = 1); a setting written in the test image survived both swaps; start 0.6 s, with a swap 4.6 s (≈ 4 s for a 530 KB image). Confirm with a live link: waits for the ESP32. Steps 2–3 next |
+| D | The copy on the 8 MB ESP32 (step 5) | waits until Dimitar attaches that board; until then the 4 MB board, streaming without a copy |
+
+The power-off tests of step 4 are announced before they run: Dimitar has to be at the boards.
 
 ## Not included
 

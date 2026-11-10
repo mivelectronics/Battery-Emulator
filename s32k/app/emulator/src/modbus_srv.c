@@ -18,6 +18,7 @@
 #include "be_cfg.h"
 #include "be_core.h"
 #include "be_gpio.h"
+#include "be_ota.h"
 #include "be_wdt.h"
 #include "can_io.h"
 #include "sim_battery.h"
@@ -84,6 +85,7 @@ static int read_sys(uint16_t r, uint16_t *v)
 	case 15: *v = lo16(be_wdt_flags_des()); break;
 	case 16: *v = hi16(be_wdt_flags_fes()); break;
 	case 17: *v = lo16(be_wdt_flags_fes()); break;
+	case 18: *v = (uint16_t)be_ota_image_state(); break;
 	default: *v = 0; break; /* reserved: read as 0 */
 	}
 	return 0;

@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+config MIV_BOOT_HOOKS
+	bool "MIV hooks for MCUboot on the S32K312"
+	default n
+	help
+	  For the MCUboot image only (the application has its own): the MPU map of the S32K312 against
+	  the speculative access hang (NXP ERR011573), and SWT0 started by MCUboot with a 10 s timeout and
+	  fed during long flash work, so that an image which hangs before it starts its own watchdog is
+	  reset and swapped back.

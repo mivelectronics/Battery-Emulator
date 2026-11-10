@@ -1,0 +1,12 @@
+/*
+ * The application under MCUboot: linked into slot 0. Added by the sysbuild build (tools/build_ota.sh).
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+#include "boards/mcuboot_layout.dtsi"
+
+/ {
+	chosen {
+		zephyr,code-partition = &slot0_partition;
+	};
+};

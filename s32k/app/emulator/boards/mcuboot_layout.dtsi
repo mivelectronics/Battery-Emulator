@@ -1,0 +1,48 @@
+/*
+ * Flash layout with MCUboot (OTA_PLAN.md section 2): bootloader, two image slots in the two flash blocks,
+ * the NVS settings where they were without MCUboot. Used by both images of a sysbuild build: MCUboot
+ * (sysbuild/mcuboot.overlay) and the application (mcuboot_app.overlay).
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+/* The board points at its code_partition, which this layout replaces: MCUboot's partition here, the
+ * application sets slot0_partition in mcuboot_app.overlay
+ */
+/ {
+	chosen {
+		zephyr,code-partition = &boot_partition;
+	};
+};
+
+&flash0 {
+	partitions {
+		/delete-node/ partition@0;
+		/delete-node/ partition@100;
+
+		/* MCUboot with the S32K3 boot header (IVT) at 0x400000 */
+		boot_partition: partition@0 {
+			compatible = "zephyr,mapped-partition";
+			label = "mcuboot";
+			reg = <0x00000000 DT_SIZE_K(64)>;
+		};
+
+		/* Running image, block 0. Swap using move: one sector bigger than slot 1 */
+		slot0_partition: partition@10000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-0";
+			reg = <0x00010000 DT_SIZE_K(920)>;
+		};
+
+		/* 0xf6000-0xfffff: 40 KB spare in block 0 */
+
+		/* New image, block 1 */
+		slot1_partition: partition@100000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-1";
+			reg = <0x00100000 DT_SIZE_K(912)>;
+		};
+
+		/* storage_partition (NVS) at 0x1e4000 stays as the board has it */
+	};
+};

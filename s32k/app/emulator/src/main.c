@@ -18,6 +18,7 @@
 #include "be_core.h"
 #include "be_kv.h"
 #include "be_link_cmd.h"
+#include "be_ota.h"
 #include "be_wdt.h"
 #include "can_io.h"
 #include "link.h"
@@ -91,7 +92,7 @@ int main(void)
 	if (gpio_is_ready_dt(&led)) {
 		gpio_pin_configure_dt(&led, GPIO_OUTPUT_INACTIVE);
 	}
-	be_cfg_init();
+	be_ota_init(be_cfg_init());
 	/* With a battery type set the core owns the CAN channels, otherwise they go to the link */
 	can_io_init(be_cfg.battery_type != 0 ? core_can_rx : link_queue_can_rx);
 	if (link_init(on_link_frame)) {
@@ -108,6 +109,7 @@ int main(void)
 		be_link_cmd_poll();
 		be_kv_store_pending();
 		be_wdt_main_alive();
+		be_ota_poll();
 #ifdef BE_SIM
 		sim_battery_main_poll();
 #endif

@@ -163,6 +163,8 @@ void be_wdt_start(void)
 	IRQ_CONNECT(SWT0_IRQn, 0, on_first_timeout, NULL, 0);
 	irq_enable(SWT0_IRQn);
 
+	/* MCUboot may have started it (10 s, no interrupt stage): the timeout changes only while it is off */
+	SWT_0->CR &= ~SWT_CR_WEN_MASK;
 	SWT_0->TO = SWT_CLOCK_HZ / 1000U * WDT_TIMEOUT_MS;
 	/* FRZ: not while a debugger holds the CPU. ITR: the first timeout is an interrupt */
 	SWT_0->CR |= SWT_CR_FRZ_MASK | SWT_CR_ITR_MASK | SWT_CR_WEN_MASK;

@@ -14,6 +14,7 @@ target_sources(app PRIVATE
   src/main.c
   src/be_cfg.c
   src/be_mpu.c
+  src/be_ota.c
   src/be_wdt.c
   src/can_io.c
   src/link.c
@@ -104,4 +105,10 @@ target_sources(app PRIVATE port/be_core_run.c port/port_time.c port/be_kv.c port
 if(BE_SIM)
   target_sources(app PRIVATE port/sim_battery.c)
   target_compile_definitions(app PRIVATE BE_SIM)
+endif()
+
+# Under MCUboot the watchdog that MCUboot started (s32k/modules/miv_boot) keeps running through the
+# start of the application until be_wdt_start() takes it over: SystemInit() of the HAL leaves SWT0 on.
+if(CONFIG_BOOTLOADER_MCUBOOT)
+  zephyr_compile_definitions(DISABLE_WDOG=0)
 endif()

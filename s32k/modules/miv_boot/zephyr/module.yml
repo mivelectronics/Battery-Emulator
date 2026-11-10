@@ -1,0 +1,4 @@
+name: miv_boot
+build:
+  cmake: .
+  kconfig: Kconfig

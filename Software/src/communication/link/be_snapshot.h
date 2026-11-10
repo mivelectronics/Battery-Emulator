@@ -92,6 +92,7 @@ struct be_set_kv {
 #define BE_S32K_F_WDT_RUNNING 0x01u
 #define BE_S32K_F_LOCKOUT 0x02u /* contactors held open after 3 watchdog or fault restarts in a row */
 #define BE_S32K_F_CORE 0x04u    /* the Battery-Emulator core runs */
+#define BE_S32K_F_TEST_IMAGE 0x08u /* started by MCUboot as a test image, not confirmed yet */
 
 struct be_s32k_can {
   uint8_t state; /* 0 error-active, 1 error-warning, 2 error-passive, 3 bus-off, 4 stopped */
