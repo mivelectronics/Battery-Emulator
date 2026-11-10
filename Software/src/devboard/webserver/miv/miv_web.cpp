@@ -20,6 +20,7 @@ void init_miv_web(AsyncWebServer&) {}
 #include "../../../communication/link/be_link.h"
 #include "../../../communication/link/be_snapshot.h"
 #include "../../../communication/link/s32k_ota.h"
+#include "../../../communication/link/s32k_store.h"
 #include "../../../communication/nvm/comm_nvm.h"
 #include "../../../datalayer/datalayer.h"
 #include "../../../devboard/safety/safety.h"
@@ -826,6 +827,39 @@ static void ota_state(AsyncWebServerRequest* request) {
   send_ota(request, 200, 0);
 }
 
+/* GET /miv/api/s32k/store: the copies kept on an 8 MB ESP32; POST /miv/api/s32k/store/install?slot=N sends
+ * one of them again (answers like the routes above) */
+static void store_get(AsyncWebServerRequest* request) {
+  char buf[512];
+  JsonOut j(buf, sizeof(buf));
+  j.open('{');
+  j.boolean("available", s32k_store_available());
+  j.key("slots");
+  j.open('[');
+  for (int s = 0; s < 2; s++) {
+    s32k_store_info i;
+    if (!s32k_store_get(s, &i)) {
+      continue;
+    }
+    j.item();
+    j.open('{');
+    j.num("slot", s);
+    j.str("state", s32k_store_state_name(i.state));
+    j.str("version", i.version);
+    j.unum("size", i.size);
+    j.unum("counter", i.counter);
+    j.close('}');
+  }
+  j.close(']');
+  j.close('}');
+  send_json(request, 200, buf);
+}
+
+static void store_install(AsyncWebServerRequest* request) {
+  const int e = s32k_ota_install(request->hasParam("slot") ? request->getParam("slot")->value().toInt() : -1);
+  send_ota(request, e == 0 ? 200 : 409, e);
+}
+
 /* ---- the page ----------------------------------------------------------------------------------------- */
 static void handle_page(AsyncWebServerRequest* request) {
   AsyncWebServerResponse* r = request->beginResponse(200, "text/html", miv_page_gz, sizeof(miv_page_gz));
@@ -849,6 +883,8 @@ void init_miv_web(AsyncWebServer& server) {
   server.on("/miv/api/s32k/ota/finish", HTTP_POST, ota_finish);
   server.on("/miv/api/s32k/ota/abort", HTTP_POST, ota_abort);
   server.on("/miv/api/s32k/ota/state", HTTP_GET, ota_state);
+  server.on("/miv/api/s32k/store/install", HTTP_POST, store_install);
+  server.on("/miv/api/s32k/store", HTTP_GET, store_get);
   // One page for /miv and everything under it that is not an API route above (a handler without a
   // wildcard also takes the paths below it, and the first one registered wins): the script picks the view
   // from the path (/miv/, /miv/settings, /miv/cells, /miv/events, /miv/update)

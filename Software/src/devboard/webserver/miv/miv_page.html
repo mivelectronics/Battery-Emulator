@@ -120,7 +120,8 @@ input,select{font:inherit;color:var(--fg);background:var(--bg);border:1px solid 
   <section class="card wide"><h2>Update the S32K</h2>
     <div class="note">Sends an S32K image (zephyr.signed.bin of the S32K build with MCUboot) over the link. The S32K writes it beside the running image, checks it and restarts into it; the new image confirms itself after a minute with the ESP32 link up, otherwise the S32K goes back to the previous image. Pause the emulator and open the contactors first: the S32K refuses otherwise. The emulator core stops during the transfer.</div>
     <p><input type="file" id="s32f" accept=".bin"> <button id="s32go" disabled>Send</button> <button id="s32stop" class="hide">Cancel</button></p>
-    <div class="prog"><i id="s32bar"></i></div><div id="s32msg" class="mut"></div></section>
+    <div class="prog"><i id="s32bar"></i></div><div id="s32msg" class="mut"></div>
+    <div id="s32store"></div></section>
 </main>
 
 <script>
@@ -406,6 +407,7 @@ let fwHw=null;
 async function loadFw(){
   if(fwHw===null){try{fwHw=(await getj("/GetFirmwareInfo")).hardware}catch(e){}}
   drawFw();
+  loadStore();
 }
 function drawFw(){
   const j=last||{};
@@ -494,13 +496,41 @@ async function s32Upload(file,head){
   }catch(e){m.textContent="S32K update refused: "+e.message;bar.style.width="0"}
   s32Busy=false;$("s32stop").classList.add("hide");$("s32go").disabled=!$("s32f").files.length;
 }
+// The copies an 8 MB ESP32 keeps (s32k_store.h): each can be sent again without the file
+async function loadStore(){
+  let st;try{st=await getj("/miv/api/s32k/store")}catch(e){return}
+  const box=$("s32store");
+  if(!st.available){box.innerHTML="";return}
+  const kept=st.slots.filter(x=>x.state!=="empty").sort((a,b)=>b.counter-a.counter);
+  box.innerHTML='<h3 style="font-size:13px;margin:12px 0 4px">Kept on the ESP32</h3>'+(kept.length?kept.map(x=>
+    '<div class="row"><span>'+esc(x.version)+" – "+esc(x.state)+" ("+kb(x.size)+')</span><span><button data-slot="'+x.slot+'">'+
+    (x.state==="current"?"Install again":"Install")+"</button></span></div>").join(""):'<small class="mut">nothing yet: an image sent from a file is kept here</small>');
+  box.querySelectorAll("button").forEach(b=>b.onclick=()=>s32Install(+b.dataset.slot,b.parentNode.previousSibling.textContent));
+}
+async function s32Install(slot,label){
+  if(s32Busy||!confirm("Send the kept S32K image "+label+" again? The emulator core stops for the transfer and the S32K restarts."))return;
+  const m=$("s32msg"),bar=$("s32bar");
+  s32Busy=true;s32Wait=null;$("s32go").disabled=true;bar.style.width="0";
+  try{
+    let s=await s32Json(await s32Post("/miv/api/s32k/store/install?slot="+slot));
+    while(s.phase==="starting"||s.phase==="sending"||s.phase==="checking"){
+      bar.style.width=(s.total?100*s.written/s.total:0)+"%";
+      m.textContent=s.phase==="checking"?"The S32K checks the image…":"Written on the S32K "+kb(s.written)+" of "+kb(s.total);
+      await sleep(200);s=await s32State();
+    }
+    if(s.phase!=="done")throw new Error(s.text||s.phase);
+    bar.style.width="100%";s32Wait={version:s.version,since:Date.now(),seenTest:false};
+    m.textContent="Image "+s.version+" checked. The S32K restarts and swaps it in; it confirms itself within a minute.";
+  }catch(e){m.textContent="S32K update refused: "+e.message;bar.style.width="0"}
+  s32Busy=false;$("s32go").disabled=!$("s32f").files.length;
+}
 // After a sent image: follows the S32K through the swap and the confirm (from every status)
 function s32Watch(j){
   const w=s32Wait;if(!w)return;
   const m=$("s32msg");
   if(j.s32k_image===w.version&&j.s32k_test_image){w.seenTest=true;m.textContent="The S32K runs "+w.version+" on test; it confirms itself within a minute."}
-  else if(j.s32k_update===w.version&&j.s32k_update_result==="installed"){m.innerHTML='<span class="yes">S32K '+esc(w.version)+" installed and confirmed.</span>";s32Wait=null}
-  else if(j.s32k_update===w.version&&j.s32k_update_result==="reverted"){m.innerHTML='<span class="no">S32K '+esc(w.version)+" did not confirm: the previous image "+esc(j.s32k_image)+" runs again.</span>";s32Wait=null}
+  else if(j.s32k_update===w.version&&j.s32k_update_result==="installed"){m.innerHTML='<span class="yes">S32K '+esc(w.version)+" installed and confirmed.</span>";s32Wait=null;setTimeout(loadStore,3000)}
+  else if(j.s32k_update===w.version&&j.s32k_update_result==="reverted"){m.innerHTML='<span class="no">S32K '+esc(w.version)+" did not confirm: the previous image "+esc(j.s32k_image)+" runs again.</span>";s32Wait=null;setTimeout(loadStore,3000)}
   else if(Date.now()-w.since>8*60000){m.textContent="No result from the S32K after 8 minutes: check the S32K card.";s32Wait=null}
 }
 

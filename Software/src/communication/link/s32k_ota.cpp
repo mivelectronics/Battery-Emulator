@@ -13,6 +13,7 @@
 #include "../can/can_link.h"
 #include "be_link.h"
 #include "be_snapshot.h"
+#include "s32k_store.h"
 
 static constexpr size_t RING_SIZE = 16384;  // four pieces of the page
 static constexpr uint32_t IMAGE_MAGIC = 0x96f3b83du;
@@ -31,6 +32,7 @@ static size_t ring_read = 0, ring_count = 0;  // ring_read: the byte at st.writt
 static bool finish_requested = false, abort_requested = false;
 static uint32_t start_ms = 0, last_piece_ms = 0, done_ms = 0;
 static uint8_t head[32];
+static int source_slot = -1;  // >= 0: a stored image is sent again, read from the store, not the ring
 
 // Core task only
 static uint32_t image_id = 0;
@@ -49,6 +51,7 @@ static void fail(int error) {
   st.error = (int16_t)error;
   st.elapsed_ms = millis() - start_ms;
   inflight = false;
+  s32k_store_cancel();
 }
 
 static bool phase_runs(uint8_t p) {
@@ -78,6 +81,16 @@ static int local_safety() {
     return BE_OTA_E_CURRENT;
   }
   return 0;
+}
+
+static void version_of(const uint8_t* h, char* out, size_t cap) {
+  const uint16_t rev = (uint16_t)(h[22] | (h[23] << 8));
+  const uint32_t build = (uint32_t)h[24] | ((uint32_t)h[25] << 8) | ((uint32_t)h[26] << 16) | ((uint32_t)h[27] << 24);
+  if (build != 0) {
+    snprintf(out, cap, "%u.%u.%u+%lu", h[20], h[21], rev, (unsigned long)build);
+  } else {
+    snprintf(out, cap, "%u.%u.%u", h[20], h[21], rev);
+  }
 }
 
 int s32k_ota_begin(const uint8_t* h, size_t head_len, uint32_t total) {
@@ -112,19 +125,50 @@ int s32k_ota_begin(const uint8_t* h, size_t head_len, uint32_t total) {
   memset(&st, 0, sizeof(st));
   memcpy(head, h, sizeof(head));
   st.total = total;
-  const uint16_t rev = (uint16_t)(h[22] | (h[23] << 8));
-  const uint32_t build = (uint32_t)h[24] | ((uint32_t)h[25] << 8) | ((uint32_t)h[26] << 16) | ((uint32_t)h[27] << 24);
-  if (build != 0) {
-    snprintf(st.version, sizeof(st.version), "%u.%u.%u+%lu", h[20], h[21], rev, (unsigned long)build);
-  } else {
-    snprintf(st.version, sizeof(st.version), "%u.%u.%u", h[20], h[21], rev);
-  }
+  version_of(h, st.version, sizeof(st.version));
   ring_read = ring_count = 0;
+  source_slot = -1;
   finish_requested = abort_requested = false;
   start_ms = last_piece_ms = millis();
   st.phase = S32K_OTA_STARTING;
   portEXIT_CRITICAL(&mux);
   logging.printf("S32K update %s, %lu bytes: starting\n", st.version, (unsigned long)total);
+  s32k_store_begin(total, st.version);  // a copy on an 8 MB ESP32; nothing without the store partitions
+  return 0;
+}
+
+int s32k_ota_install(int slot) {
+  if (!can_link_alive()) {
+    return S32K_OTA_E_NO_LINK;
+  }
+  if (s32k_ota_active()) {
+    return S32K_OTA_E_BUSY;
+  }
+  const int safety = local_safety();
+  if (safety != 0) {
+    return safety;
+  }
+  uint8_t h[32];
+  uint32_t total = 0;
+  const int err = s32k_store_open(slot, h, &total);
+  if (err != 0) {
+    return err;
+  }
+  portENTER_CRITICAL(&mux);
+  memset(&st, 0, sizeof(st));
+  memcpy(head, h, sizeof(head));
+  st.total = total;
+  st.received = total;  // all of it is here already
+  version_of(h, st.version, sizeof(st.version));
+  ring_read = ring_count = 0;
+  source_slot = slot;
+  finish_requested = true;
+  abort_requested = false;
+  start_ms = last_piece_ms = millis();
+  st.phase = S32K_OTA_STARTING;
+  portEXIT_CRITICAL(&mux);
+  s32k_store_select(slot);
+  logging.printf("S32K update %s from the store, %lu bytes: starting\n", st.version, (unsigned long)total);
   return 0;
 }
 
@@ -147,7 +191,14 @@ int s32k_ota_chunk(uint32_t offset, const uint8_t* data, size_t len) {
     st.received += len;
     last_piece_ms = millis();
   }
+  const bool complete = ret == 0 && st.received == st.total;
   portEXIT_CRITICAL(&mux);
+  if (ret == 0) {
+    s32k_store_write(offset, data, len);
+    if (complete) {
+      s32k_store_finish();
+    }
+  }
   return ret;
 }
 
@@ -226,12 +277,39 @@ static void new_frame(uint8_t op, uint32_t offset, uint32_t now_ms) {
   send_frame(now_ms);
 }
 
+// The S32K reports whether the image it got confirmed itself: the store marks it current (or not taken)
+static void follow_result(uint32_t now_ms) {
+  static uint32_t next_ms = 0;
+  static char seen[sizeof(be_s32k_status::update_version) + 1] = "";
+  if ((int32_t)(now_ms - next_ms) < 0) {
+    return;
+  }
+  next_ms = now_ms + 2000;
+  be_s32k_status k;
+  if (!be_remote_s32k_status(&k)) {
+    return;
+  }
+  k.update_version[sizeof(k.update_version) - 1] = 0;
+  const bool installed = (k.flags & BE_S32K_F_UPDATE_INSTALLED) != 0;
+  const bool reverted = (k.flags & BE_S32K_F_UPDATE_REVERTED) != 0;
+  if ((!installed && !reverted) || strcmp(seen, k.update_version) == 0) {
+    return;
+  }
+  strncpy(seen, k.update_version, sizeof(seen) - 1);
+  if (installed) {
+    s32k_store_confirmed(k.update_version);
+  } else {
+    s32k_store_reverted(k.update_version);
+  }
+}
+
 void s32k_ota_poll(uint32_t now_ms) {
   portENTER_CRITICAL(&mux);
   const uint8_t phase = st.phase;
   const bool abort_now = abort_requested;
   portEXIT_CRITICAL(&mux);
   if (!phase_runs(phase)) {
+    follow_result(now_ms);
     return;
   }
   if (abort_now) {
@@ -282,15 +360,16 @@ void s32k_ota_poll(uint32_t now_ms) {
   if (phase == S32K_OTA_SENDING) {
     portENTER_CRITICAL(&mux);
     const uint32_t written = st.written, total = st.total;
-    const size_t avail = ring_count;
+    const size_t avail = source_slot >= 0 ? total - written : ring_count;
     const bool finish = finish_requested;
+    const int from_slot = source_slot;
     const uint32_t idle = millis() - last_piece_ms;
     size_t n = avail < BE_LINK_OTA_DATA_MAX ? avail : BE_LINK_OTA_DATA_MAX;
     // Whole frames of 1000 bytes (a multiple of 8), except the last one of the image
     if (n < BE_LINK_OTA_DATA_MAX && written + n != total) {
       n = 0;
     }
-    if (n > 0) {
+    if (n > 0 && from_slot < 0) {
       size_t r = ring_read;
       for (size_t i = 0; i < n; i++) {
         frame[sizeof(be_link_ota_hdr) + i] = ring[r];
@@ -298,6 +377,13 @@ void s32k_ota_poll(uint32_t now_ms) {
       }
     }
     portEXIT_CRITICAL(&mux);
+    if (n > 0 && from_slot >= 0 && !s32k_store_read(from_slot, written, frame + sizeof(be_link_ota_hdr), n)) {
+      portENTER_CRITICAL(&mux);
+      fail(S32K_OTA_E_STORE);
+      portEXIT_CRITICAL(&mux);
+      send_abort();
+      return;
+    }
 
     if (n > 0) {
       // The header in front of the data copied above
@@ -356,8 +442,10 @@ void s32k_ota_on_ack(const uint8_t* payload, uint16_t len) {
       break;
     case BE_OTA_DATA:
       if (a.offset == st.written + frame_bytes) {
-        ring_read = (ring_read + frame_bytes) % RING_SIZE;
-        ring_count -= frame_bytes;
+        if (source_slot < 0) {
+          ring_read = (ring_read + frame_bytes) % RING_SIZE;
+          ring_count -= frame_bytes;
+        }
         st.written = a.offset;
       } else {
         fail(BE_OTA_E_SEQUENCE);
@@ -375,6 +463,7 @@ void s32k_ota_on_ack(const uint8_t* payload, uint16_t len) {
   const uint32_t elapsed = st.elapsed_ms;
   portEXIT_CRITICAL(&mux);
   if (done) {
+    s32k_store_sent();
     logging.printf("S32K update %s checked and marked in %lu ms: the S32K restarts\n", st.version,
                    (unsigned long)elapsed);
   }
@@ -398,6 +487,8 @@ const char* s32k_ota_error_text(int e) {
       return "aborted";
     case S32K_OTA_E_MEMORY:
       return "not enough memory on the ESP32";
+    case S32K_OTA_E_STORE:
+      return "the copy on the ESP32 is empty or damaged";
     case S32K_OTA_E_OFFSET:
       return "a piece out of order";
     case BE_OTA_E_NO_BOOTLOADER:

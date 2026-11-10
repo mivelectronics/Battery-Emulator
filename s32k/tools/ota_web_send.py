@@ -100,7 +100,8 @@ def main():
         if st.get("s32k_update_result") == "installed" and st.get("s32k_image") == want:
             log(f"S32K confirmed {want}")
             return 0
-        if st.get("s32k_update_result") == "reverted":
+        # (a result for another version is left over from before the restart)
+        if st.get("s32k_update_result") == "reverted" and st.get("s32k_update") == want:
             log(f"S32K reverted the update to {st.get('s32k_update')}, runs {st.get('s32k_image')}")
             return 1
     log("no confirm within 3 minutes")

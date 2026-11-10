@@ -34,6 +34,7 @@ enum s32k_ota_phase : uint8_t {
 #define S32K_OTA_E_ABORTED (-105)
 #define S32K_OTA_E_MEMORY (-106)
 #define S32K_OTA_E_OFFSET (-107)      // a piece that is not the next one
+#define S32K_OTA_E_STORE (-108)       // the stored copy is empty or damaged
 
 struct s32k_ota_state {
   uint8_t phase;      // enum s32k_ota_phase
@@ -54,6 +55,8 @@ int s32k_ota_chunk(uint32_t offset, const uint8_t* data, size_t len);
 size_t s32k_ota_room();
 // All pieces are in: the S32K checks and marks the image after the last one is written.
 int s32k_ota_finish();
+// Sends the image kept in store slot 0/1 (s32k_store.h) again, the same way as a file
+int s32k_ota_install(int slot);
 void s32k_ota_abort();
 void s32k_ota_get(s32k_ota_state* out);
 // True while the link has to stay quiet for an update
