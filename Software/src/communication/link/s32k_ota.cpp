@@ -133,7 +133,6 @@ int s32k_ota_begin(const uint8_t* h, size_t head_len, uint32_t total) {
   st.phase = S32K_OTA_STARTING;
   portEXIT_CRITICAL(&mux);
   logging.printf("S32K update %s, %lu bytes: starting\n", st.version, (unsigned long)total);
-  s32k_store_begin(total, st.version);  // a copy on an 8 MB ESP32; nothing without the store partitions
   return 0;
 }
 
@@ -438,6 +437,20 @@ void s32k_ota_on_ack(const uint8_t* payload, uint16_t len) {
   }
   switch (a.op) {
     case BE_OTA_BEGIN:
+      // Only now a store slot is given up for the copy (8 MB ESP32): an update the S32K refuses at BEGIN
+      // must not cost the previous copy. The page sends no piece before the phase says "sending".
+      if (source_slot < 0) {
+        const uint32_t total = st.total;
+        char version[sizeof(st.version)];
+        memcpy(version, st.version, sizeof(version));
+        portEXIT_CRITICAL(&mux);
+        s32k_store_begin(total, version);
+        portENTER_CRITICAL(&mux);
+        if (!phase_runs(st.phase)) {
+          portEXIT_CRITICAL(&mux);
+          return;
+        }
+      }
       st.phase = S32K_OTA_SENDING;
       break;
     case BE_OTA_DATA:
