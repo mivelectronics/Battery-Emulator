@@ -11,8 +11,10 @@
 
 #include "be_link.h"
 
-/* In HELLO and in the SNAP_S32K snapshot section */
-#define LINK_FW_VERSION "s32k-emulator 0.5"
+#include <zephyr/app_version.h>
+
+/* In HELLO and in the SNAP_S32K snapshot section; the version is the VERSION file of the application */
+#define LINK_FW_VERSION "s32k-emulator " APP_VERSION_STRING
 
 struct link_stats {
 	uint32_t tx_frames, tx_drops, rx_bytes, rx_drops, can_q_drops;

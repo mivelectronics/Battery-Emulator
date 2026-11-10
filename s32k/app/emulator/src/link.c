@@ -10,6 +10,7 @@
 #include <zephyr/sys/ring_buffer.h>
 
 #include "be_core.h"
+#include "be_ota.h"
 #include "be_snapshot.h"
 #include "can_io.h"
 
@@ -123,7 +124,8 @@ static void send_hello(void)
 	struct be_link_hello h = {
 		.proto_version = BE_LINK_PROTO_VERSION,
 		.role = BE_LINK_ROLE_CAN,
-		.reserved = be_core_active() ? BE_HELLO_FLAG_CORE_ACTIVE : 0,
+		/* The mode: an update stops the core, and the ESP32 must not take that for bridge mode */
+		.reserved = be_core_mode() ? BE_HELLO_FLAG_CORE_ACTIVE : 0,
 		.layout_hash = be_snapshot_layout_hash(),
 	};
 
@@ -154,8 +156,9 @@ static void handle_can(const struct be_link_frame *f)
 {
 	struct be_link_can m = {0};
 
-	/* The core owns the channels. Nothing from the ESP32 goes on the bus next to the drivers here */
-	if (be_core_active()) {
+	/* The core owns the channels. Nothing from the ESP32 goes on the bus next to the drivers here, nor
+	 * during an update */
+	if (be_core_active() || be_ota_busy()) {
 		return;
 	}
 
@@ -204,7 +207,9 @@ void link_poll(k_timeout_t timeout)
 	struct be_link_can m;
 
 	while (k_msgq_get(&can_rx_q, &m, K_NO_WAIT) == 0) {
-		link_send(BE_LINK_CAN, &m, be_link_can_wire_size(m.len));
+		if (!be_ota_busy()) { /* the link stays quiet during an update */
+			link_send(BE_LINK_CAN, &m, be_link_can_wire_size(m.len));
+		}
 	}
 
 	uint8_t buf[64];

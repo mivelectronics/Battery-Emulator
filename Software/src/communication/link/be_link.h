@@ -39,7 +39,7 @@ enum be_link_type {
   BE_LINK_EVENT = 6,    /* struct be_link_event (CAN -> NET) */
   BE_LINK_ACK = 7,      /* struct be_link_ack */
   BE_LINK_LOG = 8,      /* UTF-8 text, no terminator */
-  BE_LINK_OTA = 9,      /* struct be_link_chunk_hdr + part of a CAN processor image (NET -> CAN) */
+  BE_LINK_OTA = 9,      /* update of the CAN processor's image, struct be_link_ota_* below (NET -> CAN) */
 };
 
 enum be_link_role {
@@ -103,6 +103,77 @@ struct be_link_ack {
   uint8_t acked_seq;
   int16_t status; /* 0 ok, negative errno-style */
 } BE_LINK_PACKED;
+
+/*
+ * Update of the CAN processor's application (BE_LINK_OTA, NET -> CAN). The image is a signed MCUboot
+ * image (zephyr.signed.bin). One frame in flight: the sender waits for the ack of a frame (or repeats it
+ * after BE_LINK_OTA_RETRY_MS) before the next. While an update runs, the CAN processor stops its core,
+ * sends no snapshots or CAN frames and refuses other messages; the network side holds them back.
+ *
+ *   BEGIN  struct be_link_ota_begin: size and MCUboot header of the image, optionally the SHA-256 of the
+ *          whole file. Checks the header and the safety conditions, stops the core.
+ *   DATA   struct be_link_ota_hdr + bytes at hdr.offset, in order, at most BE_LINK_OTA_DATA_MAX, a
+ *          multiple of 8 except the last frame. Written to slot 1 (sectors erased as the data reaches them)
+ *          and read back before the ack.
+ *   FINISH struct be_link_ota_hdr: checks the image in slot 1 (its own SHA-256 TLV as MCUboot checks it,
+ *          the file's SHA-256 if BEGIN had one, vector table, board id), marks it
+ *          for a test start and restarts 2 s after the ack. MCUboot swaps it in; it confirms itself or
+ *          MCUboot swaps the old image back.
+ *   ABORT  struct be_link_ota_hdr: nothing is marked, restart into the running image.
+ * A transfer that stops for 10 s is aborted the same way. Every frame gets a struct be_link_ota_ack.
+ */
+#define BE_LINK_OTA_DATA_MAX 1000u
+#define BE_LINK_OTA_RETRY_MS 200u
+#define BE_LINK_OTA_TIMEOUT_MS 10000u
+
+enum be_link_ota_op {
+  BE_OTA_BEGIN = 1,
+  BE_OTA_DATA = 2,
+  BE_OTA_FINISH = 3,
+  BE_OTA_ABORT = 4,
+};
+
+struct be_link_ota_hdr {
+  uint8_t op;        /* enum be_link_ota_op */
+  uint8_t id;        /* chosen by the sender per frame, returned as acked_seq */
+  uint16_t reserved;
+  uint32_t image_id; /* chosen by the sender per transfer */
+  uint32_t total;    /* image size in bytes */
+  uint32_t offset;   /* DATA: offset of the bytes that follow */
+} BE_LINK_PACKED;
+
+struct be_link_ota_begin {
+  struct be_link_ota_hdr hdr;
+  uint8_t sha256[32]; /* of the whole file; all zero: not given (a browser on http cannot hash) */
+  uint8_t head[32];   /* the first 32 bytes of the image: the MCUboot header */
+} BE_LINK_PACKED;
+
+struct be_link_ota_ack {
+  struct be_link_ack ack; /* acked_type BE_LINK_OTA, acked_seq = hdr.id, status 0 or BE_OTA_E_* */
+  uint8_t op;             /* the op acknowledged */
+  uint8_t reserved[3];
+  uint32_t offset; /* bytes of the image written so far: where the next DATA starts */
+} BE_LINK_PACKED;
+
+/* Status of an OTA ack. The page shows a text for each. */
+#define BE_OTA_E_NO_BOOTLOADER (-200) /* the running image was not started by MCUboot */
+#define BE_OTA_E_NOT_IMAGE (-201)     /* no MCUboot image (an ESP32 file starts with 0xE9) */
+#define BE_OTA_E_TOO_BIG (-202)       /* larger than slot 1 */
+#define BE_OTA_E_FLAGS (-203)         /* encrypted, RAM load or other flags this board does not take */
+#define BE_OTA_E_CONTACTORS (-204)    /* a contactor output is on or the contactors are engaged */
+#define BE_OTA_E_NOT_PAUSED (-205)    /* charge or discharge power allowed: pause the emulator first */
+#define BE_OTA_E_CURRENT (-206)       /* current of 1 A or more */
+#define BE_OTA_E_TEST_IMAGE (-207)    /* the running image is on test, not confirmed: slot 1 is the way back */
+#define BE_OTA_E_SEQUENCE (-208)      /* no BEGIN, another transfer, or not the next offset (ack.offset is) */
+#define BE_OTA_E_FLASH (-209)         /* erase, write or read back failed */
+#define BE_OTA_E_HASH (-210)          /* SHA-256 differs (the image's own, or the file's from BEGIN) */
+#define BE_OTA_E_VECTORS (-211)       /* vector table does not point into slot 0 and RAM */
+#define BE_OTA_E_BOARD (-212)         /* board id (TLV 0xA0) missing or for another board */
+#define BE_OTA_E_TLV (-213)           /* TLV area of the image unreadable */
+#define BE_OTA_E_MARK (-214)          /* marking the image for the test start failed */
+
+/* TLV in the protected area of the image with the board's name (imgtool --custom-tlv 0xA0 <name>) */
+#define BE_OTA_TLV_BOARD 0xA0u
 
 /* CRC-16/CCITT-FALSE */
 uint16_t be_link_crc16(const uint8_t* data, size_t len);

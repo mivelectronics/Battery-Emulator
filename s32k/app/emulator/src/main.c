@@ -19,6 +19,7 @@
 #include "be_kv.h"
 #include "be_link_cmd.h"
 #include "be_ota.h"
+#include "be_snapshot.h"
 #include "be_wdt.h"
 #include "can_io.h"
 #include "link.h"
@@ -29,6 +30,23 @@ static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led1), gpios);
 
 static void on_link_frame(const struct be_link_frame *f)
 {
+	if (be_ota_frame(f)) {
+		return;
+	}
+	if (be_ota_busy()) {
+		/* During an update nothing else is taken; the ESP32 holds its messages back anyway */
+		if (f->type == BE_LINK_CMD || f->type == BE_LINK_SETTINGS) {
+			uint16_t id = 0;
+
+			if (f->len >= 4) {
+				memcpy(&id, f->payload + 2, sizeof(id));
+			}
+			struct be_link_ack a = {.acked_type = f->type, .acked_seq = (uint8_t)id, .status = -EBUSY};
+
+			link_send(BE_LINK_ACK, &a, sizeof(a));
+		}
+		return;
+	}
 	if (be_link_cmd_frame(f)) {
 		return;
 	}
@@ -102,7 +120,7 @@ int main(void)
 	be_core_start();
 	be_wdt_start();
 
-	int64_t next_led = k_uptime_get(), next_stats = k_uptime_get() + 5000;
+	int64_t next_led = k_uptime_get(), next_stats = k_uptime_get() + 5000, next_status = 0;
 
 	while (1) {
 		link_poll(K_MSEC(50));
@@ -116,6 +134,11 @@ int main(void)
 
 		int64_t now = k_uptime_get();
 
+		/* Bridge mode: no core, no snapshots; the ESP32 page still needs this chip's status */
+		if (now >= next_status && !be_core_mode() && !be_ota_busy() && link_peer_alive()) {
+			next_status = now + 1000;
+			be_s32k_status_send();
+		}
 		if (now >= next_led) {
 			next_led += 500;
 			if (gpio_is_ready_dt(&led)) {

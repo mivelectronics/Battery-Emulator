@@ -15,6 +15,7 @@ target_sources(app PRIVATE
   src/be_cfg.c
   src/be_mpu.c
   src/be_ota.c
+  src/be_sha256.c
   src/be_wdt.c
   src/can_io.c
   src/link.c
@@ -101,8 +102,8 @@ target_compile_definitions(app PRIVATE HW_MIV_S32K)
 target_sources(app PRIVATE port/be_core_run.c port/port_time.c port/be_kv.c port/be_link_cmd.c port/be_gpio.c
   port/be_s32k_status.c)
 
-# Bench simulator: west build ... -- -DBE_SIM=1
-if(BE_SIM)
+# Bench simulator: west build ... -- -DBE_SIM=1, or CONFIG_BE_SIM=y (sim.conf) under sysbuild
+if(BE_SIM OR CONFIG_BE_SIM)
   target_sources(app PRIVATE port/sim_battery.c)
   target_compile_definitions(app PRIVATE BE_SIM)
 endif()

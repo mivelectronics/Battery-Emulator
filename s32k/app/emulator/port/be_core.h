@@ -42,6 +42,11 @@ extern uint32_t be_core_tick_max_us;
 uint16_t be_core_stack_free(void);
 int be_core_start(void); /* after can_io_init(); does nothing while the battery type is 0 */
 bool be_core_active(void);
+/* Stops the core for good (until the restart): its thread no longer runs, outputs off, no CAN from it.
+ * From the main thread (the core thread is cooperative, so it is between two ticks). */
+void be_core_halt(void);
+/* The core owns the CAN channels in this run (running, or halted for an update): not bridge mode */
+bool be_core_mode(void);
 bool be_core_rx_pop(struct be_can_rx *frame);
 void be_core_rx_isr(uint8_t iface, const void *zephyr_can_frame);
 

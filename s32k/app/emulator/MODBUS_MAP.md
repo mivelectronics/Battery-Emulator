@@ -26,6 +26,8 @@ addresses inside a block read as 0; addresses outside the blocks return exceptio
 | 13 | watchdog running: 1/0 |
 | 14–15 | MC_RGM DES as it was at the start (u32), destructive reset flags |
 | 16–17 | MC_RGM FES as it was at the start (u32), functional reset flags |
+| 18 | image (MCUboot): 0 built without MCUboot, 1 confirmed, 2 test image not confirmed yet (MCUboot swaps the previous image back at the next reset) |
+| 19 | last update of the image: 0 none, 1 installed and confirmed in this run, 2 did not confirm (the previous image is back), 3 this run is the update on test. Also 5 while an update is being received over the link |
 
 ## 100–159: CAN channels (read only), 20 registers per channel
 

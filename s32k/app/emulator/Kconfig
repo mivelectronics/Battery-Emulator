@@ -1,0 +1,10 @@
+# Options of the emulator application
+
+config BE_SIM
+	bool "Bench simulator"
+	help
+	  Builds in port/sim_battery.c, a simulated battery on the bench. The same as -DBE_SIM=1 for a plain
+	  build; under sysbuild (tools/build_ota.sh) it comes in through sim.conf, because sysbuild does not
+	  pass other CMake variables on to the application.
+
+source "Kconfig.zephyr"

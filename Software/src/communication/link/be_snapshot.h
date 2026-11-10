@@ -89,10 +89,14 @@ struct be_set_kv {
 /* What only the S32K knows about itself: its CAN controllers, its watchdog and why it last started.
  * Travels as it is (fixed-width fields only) in the SNAP_S32K section. */
 #define BE_S32K_NUM_CAN 3 /* CAN0, CAN1, CAN4 */
+#define BE_SNAP_SECTION_S32K 7u /* section id of SNAP_S32K, for the C side */
 #define BE_S32K_F_WDT_RUNNING 0x01u
 #define BE_S32K_F_LOCKOUT 0x02u /* contactors held open after 3 watchdog or fault restarts in a row */
 #define BE_S32K_F_CORE 0x04u    /* the Battery-Emulator core runs */
 #define BE_S32K_F_TEST_IMAGE 0x08u /* started by MCUboot as a test image, not confirmed yet */
+#define BE_S32K_F_UPDATING 0x10u  /* an update is being received: core stopped, link quiet */
+#define BE_S32K_F_UPDATE_INSTALLED 0x20u /* update_version was installed and confirmed in this start */
+#define BE_S32K_F_UPDATE_REVERTED 0x40u  /* update_version did not confirm: MCUboot swapped the old image back */
 
 struct be_s32k_can {
   uint8_t state; /* 0 error-active, 1 error-warning, 2 error-passive, 3 bus-off, 4 stopped */
@@ -119,11 +123,16 @@ struct be_s32k_status {
   uint32_t rx_drops;    /* received CAN frames dropped before the core saw them */
   char fw_version[24];
   struct be_s32k_can can[BE_S32K_NUM_CAN];
+  char image_version[24];  /* MCUboot version of the running image, "" without MCUboot */
+  char update_version[24]; /* the update of BE_S32K_F_UPDATE_*, "" when none */
 } __attribute__((packed));
 
 #ifdef HW_MIV_S32K
 /* S32K application: fills in the status above for the snapshot */
 void be_s32k_status_fill(struct be_s32k_status* s);
+/* Sends the SNAP_S32K section alone: in bridge mode (core off) the core sends no snapshots, and the page
+ * still has to show this chip's image and update state */
+void be_s32k_status_send(void);
 #endif
 
 /* Hash of the wire layout: HELLO carries it, and the ESP32 refuses a snapshot from a different build. */

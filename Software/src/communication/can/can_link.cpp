@@ -11,6 +11,7 @@
 #include "../../devboard/utils/logging.h"
 #include "../link/be_link.h"
 #include "../link/be_snapshot.h"
+#include "../link/s32k_ota.h"
 
 static constexpr uint32_t LINK_BAUD = 2000000;
 static bool started = false;
@@ -64,6 +65,9 @@ bool can_link_configure(uint8_t iface, uint32_t nominal_kbps, uint32_t data_kbps
 }
 
 bool can_link_send(uint8_t iface, const CAN_frame& frame) {
+  if (s32k_ota_active()) {
+    return false;  // the link stays quiet while the S32K takes an update
+  }
   struct be_link_can m = {};
   m.iface = iface;
   m.flags = BE_LINK_CAN_TX | (frame.ext_ID ? BE_LINK_CAN_EXT : 0) |
@@ -162,6 +166,7 @@ void can_link_poll(void (*on_frame)(uint8_t iface, CAN_frame* frame)) {
   selftest_tx();
   selftest_report();
 #endif
+  s32k_ota_poll(millis());
   uint8_t buf[256];
   int avail;
   while ((avail = Serial1.available()) > 0) {
@@ -210,7 +215,11 @@ void can_link_poll(void (*on_frame)(uint8_t iface, CAN_frame* frame)) {
           if (f.len >= sizeof(struct be_link_ack)) {
             struct be_link_ack a;
             memcpy(&a, f.payload, sizeof(a));
-            be_remote_on_ack(a.acked_type, a.acked_seq, a.status);
+            if (a.acked_type == BE_LINK_OTA) {
+              s32k_ota_on_ack(f.payload, f.len);
+            } else {
+              be_remote_on_ack(a.acked_type, a.acked_seq, a.status);
+            }
           }
           break;
         case BE_LINK_LOG: {

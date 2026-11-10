@@ -17,6 +17,7 @@
 #include "be_cfg.h"
 #include "be_core.h"
 #include "be_kv.h"
+#include "be_ota.h"
 #include "be_snapshot.h"
 #include "link.h"
 
@@ -325,6 +326,9 @@ static bool send_sync_cfg(int n)
 
 void be_link_cmd_poll(void)
 {
+	if (be_ota_busy()) {
+		return; /* the link stays quiet during an update */
+	}
 	if (pending_cfg_dirty && k_uptime_get() - pending_cfg_since >= COMMIT_QUIET_MS) {
 		commit_pending_cfg();
 	}

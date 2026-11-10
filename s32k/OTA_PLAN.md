@@ -91,17 +91,22 @@ save about 150–300 KB more. Not needed now.
 1. The `/miv/update` view gets a second field, "S32K firmware" (`zephyr.signed.bin`). The browser sends
    it in 4 KB pieces through `POST /miv/api/s32k/ota/begin | chunk?offset=N | finish`, with
    `GET /miv/api/s32k/ota/state` for the progress bar.
-2. The ESP32 forwards each piece over the link as `BE_LINK_OTA` (type 9, already reserved): BEGIN (first
-   32 bytes of the image, size, SHA-256, version text), DATA (offset + up to 1000 bytes; the frame has a
-   CRC-16), FINISH, ABORT. The S32K acknowledges each with `BE_LINK_ACK` (status + offset); the ESP32
-   repeats a frame not acknowledged within 200 ms.
+2. The ESP32 forwards each piece over the link as `BE_LINK_OTA` (type 9; `be_link.h` has the frames and
+   the `BE_OTA_E_*` codes): BEGIN (first 32 bytes of the image, size; the SHA-256 of the file is optional,
+   see rule 3), DATA (offset + up to 1000 bytes, a multiple of 8 except the last; the frame has a CRC-16),
+   FINISH, ABORT. The S32K acknowledges each with `struct be_link_ota_ack` (status + bytes written); the
+   ESP32 repeats a frame not acknowledged within 200 ms (FINISH: 3 s). A repeated frame is taken once,
+   a DATA at the wrong offset is refused with the right one. ESP32 side: `communication/link/s32k_ota.*`
+   (a 16 KB buffer between page and link), routes in `miv_web.cpp`.
 3. The **S32K application** (not a bootloader) writes slot 1 in its main thread: erase a sector when the
    write reaches it, write, read back. At FINISH it checks the image (section 6, rule 3), marks it as a
    test image (`boot_request_upgrade(BOOT_UPGRADE_TEST)`) and restarts after 2 s.
 4. MCUboot swaps and starts the new image; the image confirms itself or MCUboot swaps back.
 
 Expected time for 712 KB: transfer ≈ 6–8 s, erases ≈ 89 × 50 ms ≈ 4.5 s, HTTP ≈ 3 s → **about 15 s**,
-then the swap at the start (estimate 5–10 s, measured in step 1). The S32K runs its old image (core
+then the swap at the start (measured in step 1: about 4 s for 530 KB). Measured in step 2 with a PC on the
+OpenSDA port at 115200 baud: 549 KB in 68 s (7.8 KB/s, the line is the limit), the check at FINISH 0.2 s;
+over the 2 Mbit/s link to the ESP32 not measured yet. The S32K runs its old image (core
 stopped) during the transfer and always has an application.
 
 ## 5. The copy on the 8 MB ESP32 (addition, last step)
@@ -153,19 +158,30 @@ the two "install" buttons are missing (the page asks for the file again).
    debug stays on.
 2. **Confirm, the same for every configuration** (battery type 0 included): main thread alive, settings
    read from NVS without an error, link to the ESP32 up (HELLO received), 60 s since the start without a
-   watchdog or fault reset. No link within 5 minutes → restart without a confirm → MCUboot swaps back.
-   Before BEGIN the S32K writes "update to version X pending" to NVS, so the image that runs afterwards
-   knows whether it is the new one or the old one back, and reports "update reverted".
+   watchdog or fault reset. **Not confirmed within 5 minutes, whatever the reason** (no link, settings
+   not read, a start after a watchdog or fault reset) → restart without a confirm → MCUboot swaps back.
+   (From the review of step 1: a start that cannot confirm would otherwise stay on the test image until
+   some later reset, which MCUboot would then turn into a swap back at a random moment.)
+   After the checks at FINISH and before marking the image, the S32K writes "update to version X pending"
+   to NVS (key `beota/pending`, outside the emulator's settings), so the image that runs afterwards knows
+   whether it is the new one or the old one back: Modbus 19, the SNAP_S32K flags `UPDATE_INSTALLED` /
+   `UPDATE_REVERTED` and `update_version`, and the page show it. Written at FINISH rather than before
+   BEGIN: an aborted transfer then leaves no marker behind.
 3. **Checks of the file** before anything is written: MCUboot magic `0x96f3b83d` (an ESP32 file starts
    with `0xE9`), size within slot 1, no load address or encryption flags (all from the 32 byte header in
-   BEGIN); at FINISH the vector table points into slot 0 and RAM, a board id TLV (imgtool
-   `--custom-tlv`, tag 0xA0) equals the board's id, and the SHA-256 matches. The ESP32 checks the header
-   first and refuses on the page.
+   BEGIN); at FINISH the image's own SHA-256 (TLV 0x10 over header, image and protected TLVs, what
+   MCUboot checks) matches, the SHA-256 of the whole file matches when BEGIN carried one, the vector table
+   points into slot 0 and RAM, and a board id TLV (imgtool `--custom-tlv 0xA0 <board>`, the Zephyr board
+   name; `mcuboot_app.conf` and `ota_images.py` add it) equals the board's. The file hash is optional
+   because a browser on plain http has no `crypto.subtle`. The ESP32 checks the header first and refuses
+   on the page (an ESP32 file gets its own message).
 4. **The link is quiet during an update.** The S32K receives with DMA into 2 × 512 bytes; erasing a
    sector locks the interrupts for 40–50 ms. One OTA frame in flight; the S32K erases only after a whole
    frame is in and before its ack; the ESP32 holds back settings, commands, live battery settings and
    bridge CAN frames (they wait in the queue of `be_snapshot.cpp`), only the 1 s HELLO goes out; the
-   S32K refuses other messages and sends no snapshot or CAN.
+   S32K refuses other messages (-EBUSY) and sends no snapshot or CAN. The S32K's HELLO keeps its "core"
+   flag while the core is stopped for the update (it tells the mode, not the run state), otherwise the
+   ESP32 would take it for bridge mode and restart.
 5. **Web access.** `/miv/api/s32k/ota/*` sit behind the same global middleware as the upstream pages and
    `/ota` (web password, or local network only). The chunk body arrives before the middleware decides,
    so the chunk handler calls `webserver_request_authorized()` itself, as `/ota/upload` does.
@@ -173,7 +189,9 @@ the two "install" buttons are missing (the page asks for the file again).
 ## 7. Safety
 
 - The S32K refuses BEGIN unless: the contactor outputs are off (Modbus 226 bits 0–3), `contactors_engaged`
-  is 0, the emulator is paused (limits 0) and the current is below 1 A. The page says which failed.
+  is 0, the emulator is paused (limits 0) and the current is below 1 A. The page says which failed. In
+  bridge mode (battery type 0) the S32K has no core to ask: it checks its outputs, and the ESP32 checks
+  the same conditions on its own core before BEGIN.
 - On BEGIN the core stops: no CAN to battery and inverter (a Kona opens its own contactors), outputs off
   until the restart.
 - Nothing writes NVS during the update; NVS is outside both slots.
@@ -182,7 +200,7 @@ the two "install" buttons are missing (the page asks for the file again).
 
 ## 8. Programming and tests
 
-- Build: `s32k/tools/build_ota.sh mb|prod|sim` (sysbuild into `zw/b/ota_<variant>`; MCUboot +
+- Build: `s32k/tools/build_ota.sh mb|prod|sim|link|linksim` (sysbuild into `zw/b/ota_<variant>`; MCUboot +
   application; `sysbuild.conf`, `sysbuild/mcuboot.conf|overlay`, `mcuboot_app.conf|overlay` and the
   module `s32k/modules/miv_boot`). The plain builds (`zw/b/emu*`, no MCUboot) stay as they are for the
   simulator suite.
@@ -192,6 +210,14 @@ the two "install" buttons are missing (the page asks for the file again).
   trailer), so no swap follows an SWD load. `ota_images.py <build> bin --version V` signs the image
   that goes over OTA.
 - A PEmicro load wipes the NVS (checked again in step 1), so `full.hex` carries everything in one load.
+- The simulator comes into a sysbuild build as `CONFIG_BE_SIM` (`sim.conf`): sysbuild does not pass other
+  CMake variables on (found in step 2: the earlier `ota_sim` build had no simulator).
+- Updates without an ESP32: variants `link` (core off) and `linksim` (bench simulator) put the link on
+  the OpenSDA port at 115200; `s32k/tools/ota_link_test.py` (with `be_link.py`) takes the ESP32's place.
+  With the core off the S32K sends its SNAP_S32K status alone once a second (also for the page in
+  bridge mode). The simulated battery reports 5 A, so on `linksim` an update is refused (CURRENT): the
+  update cycle runs on `link`.
+- Through the ESP32: `s32k/tools/ota_web_send.py <ip> <image>` uses the same routes as the page.
 - Debugging under MCUboot: breakpoints in the application hit only after the debugger has stopped once
   in MCUboot (set `main` of MCUboot first); a load and the trace in one gdb session (a separate load
   lets a looping image use up the chip's reset escalation before gdb attaches).
@@ -223,7 +249,7 @@ before it.
 |---|---|---|
 | A | Battery HTML renderers out of the S32K build | 6d1d1ec4, −23 624 B; core (53) and Modbus (18) checks pass; the 212 with the ESP32 not run yet |
 | B | What pulled the stream/locale parts of `libstdc++`: our `port/WString.h` | 117ee234, −149 012 B; same checks |
-| C | Steps 1–3 on the FRDM (MCUboot with two slots; link protocol and slot writer; web part) | step 1 done on the FRDM (MCUboot 36 KB, image 542 KB): start through MCUboot; test image from slot 1 swapped in (register 18 = 2); without the link not confirmed, restart after 5 min and swapped back (18 = 1); a setting written in the test image survived both swaps; start 0.6 s, with a swap 4.6 s (≈ 4 s for a 530 KB image). Confirm with a live link: waits for the ESP32. Steps 2–3 next |
+| C | Steps 1–3 on the FRDM (MCUboot with two slots; link protocol and slot writer; web part) | step 1 done (MCUboot 36 KB; start 0.6 s, with a swap 4.6 s; swap in, swap back, settings kept). Step 2 done on the FRDM with a PC in place of the ESP32 (variants `link`/`linksim`, `ota_link_test.py`, 17 + 7 checks): update 0.6.0 → 0.6.1, swap, test image, confirm after 60 s with the link up; refused: ESP32 file, too big, not paused, current (5 A of the simulator), corrupted image (HASH), other board; repeated and misplaced DATA; ABORT and a stalled transfer restart into the running image; an update not confirmed (HELLO stopped) swapped back after 301 s and reported as reverted. 549 KB at 115200 in 68 s, check 0.4 s, status again 8 s after FINISH. Image 546 648 B (`ota_mb`, +4.5 KB). ESP32 side (`s32k_ota.*`, `/miv/api/s32k/ota/*`) only built: no ESP32 attached (flash 96.0 %). Step 3 next |
 | D | The copy on the 8 MB ESP32 (step 5) | waits until Dimitar attaches that board; until then the 4 MB board, streaming without a copy |
 
 The power-off tests of step 4 are announced before they run: Dimitar has to be at the boards.

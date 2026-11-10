@@ -7,6 +7,7 @@ void init_miv_web(AsyncWebServer&) {}
 #else
 
 #include <Arduino.h>
+#include <errno.h>
 #include <memory>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -15,7 +16,10 @@ void init_miv_web(AsyncWebServer&) {}
 #include <string.h>
 
 #include "../../../battery/BATTERIES.h"
+#include "../../../communication/can/can_link.h"
+#include "../../../communication/link/be_link.h"
 #include "../../../communication/link/be_snapshot.h"
+#include "../../../communication/link/s32k_ota.h"
 #include "../../../communication/nvm/comm_nvm.h"
 #include "../../../datalayer/datalayer.h"
 #include "../../../devboard/safety/safety.h"
@@ -307,8 +311,8 @@ static void write_status(JsonOut& j) {
   bool have_k = false;
   uint32_t rev = 0;
   bool have_rev = false;
+  have_k = be_remote_s32k_status(&k);  // in bridge mode too: the S32K sends its own status alone
   if (remote) {
-    have_k = be_remote_s32k_status(&k);
     have_rev = be_remote_settings_revision(&rev);
   }
   if (have_rev) {
@@ -327,9 +331,19 @@ static void write_status(JsonOut& j) {
     j.unum("s32k_tick_max_us", k.tick_max_us);
     j.unum("s32k_rx_drop", k.rx_drops);
     j.unum("s32k_outputs", k.outputs);
+    k.image_version[sizeof(k.image_version) - 1] = 0;
+    k.update_version[sizeof(k.update_version) - 1] = 0;
+    j.str("s32k_image", k.image_version);  // MCUboot version, "" without MCUboot
+    j.boolean("s32k_test_image", (k.flags & BE_S32K_F_TEST_IMAGE) != 0);
+    j.str("s32k_update", k.update_version);
+    j.str("s32k_update_result", (k.flags & BE_S32K_F_UPDATE_INSTALLED)  ? "installed"
+                                  : (k.flags & BE_S32K_F_UPDATE_REVERTED) ? "reverted"
+                                  : (k.flags & BE_S32K_F_TEST_IMAGE)      ? "on_test"
+                                                                          : "");
   } else {
     for (const char* n : {"s32k_uptime_s", "s32k_fw", "s32k_reset", "s32k_restarts_in_row", "s32k_lockout",
-                          "s32k_wdt", "s32k_tick_max_us", "s32k_rx_drop", "s32k_outputs"}) {
+                          "s32k_wdt", "s32k_tick_max_us", "s32k_rx_drop", "s32k_outputs", "s32k_image",
+                          "s32k_test_image", "s32k_update", "s32k_update_result"}) {
       j.null(n);
     }
   }
@@ -726,6 +740,92 @@ static void handle_events_clear(AsyncWebServerRequest* request) {
   send_json(request, 200, "{\"v\":1,\"cleared\":true}");
 }
 
+/* ---- /miv/api/s32k/ota/...: update of the S32K's application (s32k_ota.h, OTA_PLAN.md section 4) ----------
+ * POST begin?size=N   body: the first 32 bytes of zephyr.signed.bin (its MCUboot header)
+ * POST chunk?offset=N body: the next piece (4 KB); 503 when the buffer is full (send it again), 409 on an error
+ * POST finish         every piece is in: the S32K checks and marks the image, then restarts
+ * POST abort
+ * GET  state          progress; every answer above carries the same fields
+ * Body callbacks run before the global middleware decides, so they check the access themselves. */
+static AsyncWebServerRequest* ota_req = nullptr;  // the request the body below belongs to
+static int ota_req_status = 0;
+static uint32_t ota_req_offset = 0;
+
+static uint32_t param_u32(AsyncWebServerRequest* request, const char* name) {
+  return request->hasParam(name) ? strtoul(request->getParam(name)->value().c_str(), nullptr, 10) : 0;
+}
+
+static void send_ota(AsyncWebServerRequest* request, int code, int error) {
+  s32k_ota_state s;
+  s32k_ota_get(&s);
+  static const char* const phases[] = {"idle", "starting", "sending", "checking", "done", "failed"};
+  char buf[512];
+  JsonOut j(buf, sizeof(buf));
+  j.open('{');
+  j.num("error", error != 0 ? error : s.error);
+  j.str("text", s32k_ota_error_text(error != 0 ? error : s.error));
+  j.str("phase", s.phase < 6 ? phases[s.phase] : "?");
+  j.unum("total", s.total);
+  j.unum("received", s.received);
+  j.unum("written", s.written);
+  j.unum("elapsed_ms", s.elapsed_ms);
+  j.unum("repeats", s.repeats);
+  j.str("version", s.version);
+  j.boolean("link", can_link_alive());
+  j.close('}');
+  send_json(request, code, buf);
+}
+
+static void ota_begin_body(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+  if (!webserver_request_authorized(request) || index != 0) {
+    return;
+  }
+  ota_req = request;
+  ota_req_status = s32k_ota_begin(data, len, param_u32(request, "size"));
+}
+
+static void ota_begin(AsyncWebServerRequest* request) {
+  const int e = ota_req == request ? ota_req_status : BE_OTA_E_NOT_IMAGE;
+  ota_req = nullptr;
+  send_ota(request, e == 0 ? 200 : 409, e);
+}
+
+static void ota_chunk_body(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+  if (!webserver_request_authorized(request)) {
+    return;
+  }
+  if (index == 0) {
+    ota_req = request;
+    ota_req_offset = param_u32(request, "offset");
+    s32k_ota_state s;
+    s32k_ota_get(&s);
+    ota_req_status = ota_req_offset != s.received ? S32K_OTA_E_OFFSET : s32k_ota_room() < total ? -EAGAIN : 0;
+  }
+  if (ota_req == request && ota_req_status == 0) {
+    ota_req_status = s32k_ota_chunk(ota_req_offset + index, data, len);
+  }
+}
+
+static void ota_chunk(AsyncWebServerRequest* request) {
+  const int e = ota_req == request ? ota_req_status : S32K_OTA_E_OFFSET;
+  ota_req = nullptr;
+  send_ota(request, e == 0 ? 200 : e == -EAGAIN ? 503 : 409, e == -EAGAIN ? 0 : e);
+}
+
+static void ota_finish(AsyncWebServerRequest* request) {
+  const int e = s32k_ota_finish();
+  send_ota(request, e == 0 ? 200 : 409, e);
+}
+
+static void ota_abort(AsyncWebServerRequest* request) {
+  s32k_ota_abort();
+  send_ota(request, 200, 0);
+}
+
+static void ota_state(AsyncWebServerRequest* request) {
+  send_ota(request, 200, 0);
+}
+
 /* ---- the page ----------------------------------------------------------------------------------------- */
 static void handle_page(AsyncWebServerRequest* request) {
   AsyncWebServerResponse* r = request->beginResponse(200, "text/html", miv_page_gz, sizeof(miv_page_gz));
@@ -744,6 +844,11 @@ void init_miv_web(AsyncWebServer& server) {
   server.on("/miv/api/settings", HTTP_POST, handle_settings_post);
   server.on("/miv/api/events/clear", HTTP_POST, handle_events_clear);
   server.on("/miv/api/events", HTTP_GET, handle_events);
+  server.on("/miv/api/s32k/ota/begin", HTTP_POST, ota_begin, nullptr, ota_begin_body);
+  server.on("/miv/api/s32k/ota/chunk", HTTP_POST, ota_chunk, nullptr, ota_chunk_body);
+  server.on("/miv/api/s32k/ota/finish", HTTP_POST, ota_finish);
+  server.on("/miv/api/s32k/ota/abort", HTTP_POST, ota_abort);
+  server.on("/miv/api/s32k/ota/state", HTTP_GET, ota_state);
   // One page for /miv and everything under it that is not an API route above (a handler without a
   // wildcard also takes the paths below it, and the first one registered wins): the script picks the view
   // from the path (/miv/, /miv/settings, /miv/cells, /miv/events, /miv/update)

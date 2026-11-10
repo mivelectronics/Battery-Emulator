@@ -17,6 +17,18 @@
 
 BUILD_ASSERT(BE_S32K_NUM_CAN == BE_NUM_CAN, "SNAP_S32K carries every CAN channel");
 
+void be_s32k_status_send(void)
+{
+	struct {
+		uint8_t section;
+		uint8_t reserved[3];
+		struct be_s32k_status s;
+	} __packed m = {.section = BE_SNAP_SECTION_S32K};
+
+	be_s32k_status_fill(&m.s);
+	(void)link_send(BE_LINK_SNAPSHOT, &m, sizeof(m));
+}
+
 void be_s32k_status_fill(struct be_s32k_status *s)
 {
 	memset(s, 0, sizeof(*s));
@@ -25,13 +37,18 @@ void be_s32k_status_fill(struct be_s32k_status *s)
 	s->flags = (be_wdt_running() ? BE_S32K_F_WDT_RUNNING : 0) |
 		   (be_wdt_contactors_locked_out() ? BE_S32K_F_LOCKOUT : 0) |
 		   (be_core_active() ? BE_S32K_F_CORE : 0) |
-		   (be_ota_image_state() == BE_IMAGE_TEST ? BE_S32K_F_TEST_IMAGE : 0);
+		   (be_ota_image_state() == BE_IMAGE_TEST ? BE_S32K_F_TEST_IMAGE : 0) |
+		   (be_ota_busy() ? BE_S32K_F_UPDATING : 0) |
+		   (be_ota_update_result() == BE_UPDATE_INSTALLED ? BE_S32K_F_UPDATE_INSTALLED : 0) |
+		   (be_ota_update_result() == BE_UPDATE_REVERTED ? BE_S32K_F_UPDATE_REVERTED : 0);
 	s->outputs = be_gpio_levels();
 	s->outputs_after_reset = be_gpio_outputs_after_reset();
 	s->uptime_s = (uint32_t)(k_uptime_get() / 1000);
 	s->tick_max_us = be_core_tick_max_us;
 	s->rx_drops = be_core_rx_drops;
 	strncpy(s->fw_version, LINK_FW_VERSION, sizeof(s->fw_version) - 1);
+	strncpy(s->image_version, be_ota_image_version(), sizeof(s->image_version) - 1);
+	strncpy(s->update_version, be_ota_update_version(), sizeof(s->update_version) - 1);
 
 	for (uint8_t i = 0; i < BE_NUM_CAN; i++) {
 		enum can_state st = CAN_STATE_STOPPED;

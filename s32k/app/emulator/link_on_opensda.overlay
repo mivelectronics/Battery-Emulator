@@ -1,0 +1,22 @@
+/*
+ * Test variant: the link to the network module on the OpenSDA virtual COM port (LPUART6) instead of
+ * LPUART4, so that a PC speaks the be_link protocol in place of the ESP32 (s32k/tools/ota_link_test.py).
+ * The console is turned off (link_on_opensda.conf). Modbus stays on RS485. Requests 46/47 are LPUART6
+ * TX/RX on DMAMUX1 (channels 6-11; LPUART4 uses 8 and 9).
+ */
+/ {
+	chosen {
+		/delete-property/ zephyr,console;
+		/delete-property/ zephyr,shell-uart;
+	};
+
+	aliases {
+		be-link = &lpuart_6;
+	};
+};
+
+&lpuart_6 {
+	current-speed = <115200>;
+	dmas = <&edma 10 46>, <&edma 11 47>;
+	dma-names = "tx", "rx";
+};

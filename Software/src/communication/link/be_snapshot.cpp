@@ -1,4 +1,5 @@
 #include "be_snapshot.h"
+#include "s32k_ota.h"
 #include "../contactorcontrol/comm_contactorcontrol.h"
 
 #if defined(HW_MIV_S32K) || defined(CAN_VIA_LINK)
@@ -186,6 +187,7 @@ struct be_snap_s32k {
 } BE_LINK_PACKED;
 
 static_assert(sizeof(be_snap_s32k) <= BE_LINK_MAX_PAYLOAD, "does not fit a frame");
+static_assert(SNAP_S32K == BE_SNAP_SECTION_S32K, "be_s32k_status_send() uses the same id");
 static_assert(sizeof(be_snap_system) <= BE_LINK_MAX_PAYLOAD, "does not fit a frame");
 static_assert(sizeof(be_snap_aggregate) <= BE_LINK_MAX_PAYLOAD, "does not fit a frame");
 static_assert(sizeof(be_snap_settings) <= BE_LINK_MAX_PAYLOAD, "does not fit a frame");
@@ -590,6 +592,9 @@ void be_remote_on_ack(uint8_t type, uint8_t id, int16_t status) {
 }
 
 static void out_pump(uint32_t now_ms) {
+  if (s32k_ota_active()) {
+    return;  // held back while the S32K takes an update; they wait in the queue
+  }
   if (!out_busy) {
     if (out_queue == nullptr || xQueueReceive(out_queue, &out_item, 0) != pdTRUE) {
       return;
@@ -955,7 +960,17 @@ static void apply_events(const uint8_t* payload, uint16_t len) {
 static void apply_snapshot(const uint8_t* p, uint16_t len);
 
 void be_remote_on_snapshot(const uint8_t* p, uint16_t len) {
-  if (!active || len < 1) {
+  if (len < 1) {
+    return;
+  }
+  if (!active) {
+    // Bridge mode: the S32K sends only its own status (image, update), for the page
+    if (p[0] == SNAP_S32K && len == sizeof(be_snap_s32k)) {
+      apply_seq = apply_seq + 1;
+      memcpy(&s32k_status, p + offsetof(be_snap_s32k, s), sizeof(s32k_status));
+      s32k_status_valid = true;
+      apply_seq = apply_seq + 1;
+    }
     return;
   }
   last_snapshot_ms = millis();
@@ -1042,7 +1057,7 @@ void be_remote_tick(uint32_t now_ms) {
   next_1s = now_ms + 1000;
 
   // The S32K switched to bridge mode (battery type 0): the local core logic has to start from scratch
-  if (!hello_core_active && (now_ms - last_hello_ms) < 3000 && restart_at_ms == 0) {
+  if (!s32k_ota_active() && !hello_core_active && (now_ms - last_hello_ms) < 3000 && restart_at_ms == 0) {
     logging.println("S32K core stopped: restarting to use the local settings");
     delay(100);
     ESP.restart();
@@ -1054,7 +1069,8 @@ void be_remote_tick(uint32_t now_ms) {
   datalayer.system.info.CPU_free_heap = ESP.getFreeHeap();
 
   // What is on the page is no longer true once the S32K goes quiet
-  const bool quiet = (now_ms - last_snapshot_ms) > 5000;
+  // (no snapshots during an update and its restart: not a missing battery)
+  const bool quiet = (now_ms - last_snapshot_ms) > 5000 && !s32k_ota_active();
   if (quiet && !stale) {
     logging.println("No data from the S32K for 5 s");
     datalayer.battery.status.CAN_battery_still_alive = 0;

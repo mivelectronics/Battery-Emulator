@@ -13,6 +13,7 @@
 #include <zephyr/sys/printk.h>
 
 #include "be_cfg.h"
+#include "be_gpio.h"
 #include "can_io.h"
 #include "sim_battery.h"
 
@@ -25,6 +26,7 @@ static struct k_msgq core_rx_q;
 Z_KERNEL_STACK_DEFINE_IN(core_stack, CORE_STACK_SIZE, __dtcm_noinit_section);
 static struct k_thread core_thread_data;
 static bool active;
+static bool halted;
 uint32_t be_core_rx_drops;
 uint32_t be_core_tick_max_us;
 volatile uint32_t be_core_ticks;
@@ -121,4 +123,20 @@ int be_core_start(void)
 bool be_core_active(void)
 {
 	return active;
+}
+
+bool be_core_mode(void)
+{
+	return active || halted;
+}
+
+void be_core_halt(void)
+{
+	if (active) {
+		/* First not active: the watchdog then stops checking the ticks, received frames are dropped */
+		active = false;
+		halted = true;
+		k_thread_suspend(&core_thread_data);
+	}
+	be_gpio_safe_off();
 }
