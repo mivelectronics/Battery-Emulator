@@ -48,6 +48,22 @@ Risks found, with what to do about them:
 4. **Console.** MCUboot logs on LPUART6, which is the Modbus port of the `emu_mb` test build: its log
    is turned off in that variant.
 
+**Watchdog from the bootloader on.** A test image that hangs before it starts SWT0 would never reset,
+so there would be no way back. Therefore MCUboot starts SWT0 itself and it stays on into the
+application:
+
+- MCUboot lets the watchdog be replaced through two weak functions, `mcuboot_watchdog_setup()` and
+  `mcuboot_watchdog_feed()` (`BOOT_WATCHDOG_SETUP_AT_BOOT`, `BOOT_WATCHDOG_FEED`). Our small module (the
+  same one that carries the MPU map) implements them on the SWT0 registers, like `be_wdt.c` does, not
+  through the Zephyr SWT driver.
+- Timeout **10 s**, fed by MCUboot between the sector steps of a swap (`MCUBOOT_WATCHDOG_FEED()` is
+  called there), so a swap of any length is covered, and a swap that stops is reset.
+- The application finds SWT0 already running: `be_wdt_start()` unlocks it, sets its own 500 ms and its
+  two stages as today. Between the jump and `be_wdt_start()` the 10 s of the bootloader apply. A hang in
+  that time resets the chip, the image is not confirmed, MCUboot swaps the old one back.
+- Not locked (no hard lock), so the application can reconfigure it. The freeze-in-debug bit stays set
+  as today, so SWD debugging still works.
+
 Fallback if MCUboot fails on this part: an own bootloader of about 300 lines with the same layout
 (length + magic + CRC32/SHA-256, then jump). "Pick the slot" without a swap needs every image built
 twice, once for each slot address; "copy slot 1 over slot 0" is simple but has no way back. Only if
@@ -99,9 +115,48 @@ Code flash: block 0 = 0x400000–0x4FFFFF (1024 KB), block 1 = 0x500000–0x5F3F
 4. Expected time for 712 KB: erase 89 × ~50 ms ≈ 4.5 s, transfer at 2 Mbit/s with one block in flight
    ≈ 6–8 s, HTTP pieces ≈ 3 s → **about 15–20 s**, then the swap at start (estimate 5–10 s, measured in
    step 1).
-5. After the restart the new image confirms itself when the core runs, the link is up and 60 s passed
-   without a watchdog; until then the status shows "S32K: test image, not confirmed". `s32k_fw` in
+5. **Confirming the new image, the same for every configuration** (battery type 0 included, where the
+   core does not run). The image confirms itself when all of these hold:
+   - the main thread is alive (it feeds the watchdog);
+   - the settings were read from NVS without an error;
+   - the link to the ESP32 is up (HELLO received from it);
+   - 60 s have passed since the start without a watchdog or fault reset.
+
+   The link is in the list on purpose: an image with a broken link could never be updated again over
+   the web. Until it is confirmed the status shows "S32K: test image, not confirmed". `s32k_fw` in
    `/miv/api/status` shows the version (the version text grows a build id).
+6. **No ESP32 after the restart.** If the link does not come up within **5 minutes**, the new image
+   restarts itself without confirming, and MCUboot puts the old image back. Before BEGIN the S32K
+   writes "update to version X pending" into NVS; the old image, finding that marker with its own,
+   different version, reports "update reverted" (event and status) and clears it. An update is always
+   started from the ESP32, so the ESP32 was there a minute before; if it is really gone, running the
+   proven old image is the safe side.
+7. **BEGIN carries the first 32 bytes of the image** (the MCUboot header). The S32K refuses the update
+   unless:
+   - the magic is MCUboot's (`0x96f3b83d`): an ESP32 file starts with `0xE9` and fails here;
+   - header + image + trailer fit in slot 1 (912 KB);
+   - the image has no load address and no encryption flags.
+
+   At FINISH, before the image is marked, more checks that cost nothing:
+   - the vector table at the start of the image points into slot 0 (reset handler) and into RAM
+     (stack);
+   - a board id TLV (imgtool `--custom-tlv`, our own tag 0xA0) equals the board's id, for example
+     `frdm_a_s32k312` or later the MIV board: an image of another board is refused;
+   - the SHA-256 of the whole image matches the hash TLV.
+
+   The ESP32 makes the first check too, before it sends anything, so a wrong file is refused at once on
+   the page.
+8. **The link is quiet during an update, apart from the update itself.** The S32K receives with DMA into
+   2 × 512 bytes; while a sector is erased the interrupts are locked for 40–50 ms and only about
+   1 KB more can come in. So:
+   - the ESP32 sends exactly one OTA frame and waits for its ack;
+   - the S32K erases only after the whole frame is in and before it acks, so no frame of the update is
+     on the wire during an erase;
+   - the ESP32 holds back everything else: settings, commands, the live battery settings, and the CAN
+     frames of bridge mode. The queue (`out_pump` in `be_snapshot.cpp`) waits and goes on after the
+     update. Only the 1 s HELLO (under 40 bytes) still goes out;
+   - the S32K refuses any other message while an update runs, and stops its own snapshot and CAN
+     traffic (the core is stopped).
 
 The same commands are reachable without the web page (step 2): a small script on the PC through the
 ESP32, so the S32K side is tested before the page exists.
@@ -119,6 +174,11 @@ ESP32, so the S32K side is tested before the page exists.
 - Any link silence over 10 s, ABORT, or a wrong SHA-256 at FINISH: slot 1 is left unmarked, the S32K
   restarts into the old image with the core as configured.
 - Never a write while the contactors are closed: the check is on the S32K itself, not only in the page.
+- **Web access.** `/miv/api/s32k/ota/*` sits behind the same global middleware of the server as the
+  upstream pages and `/ota`: the web password when it is on, otherwise local network only. One trap,
+  known from ElegantOTA: the body of an upload arrives in the body callback before the middleware
+  decides. So the chunk handler checks `webserver_request_authorized()` itself before it passes a single
+  byte on, as `/ota/upload` does, and the request is then answered 401/403 by the middleware.
 
 ## e) Programming and tests with the new layout
 
@@ -138,7 +198,7 @@ ESP32, so the S32K side is tested before the page exists.
 | 1 | Partitions in the board, sysbuild with MCUboot, MPU module in the bootloader, application without boot header; on the board: start through MCUboot, an image put into slot 1 through SWD swaps in, without confirm swaps back, settings survive | 2–3 (+1–2 if MCUboot needs work on this part) |
 | 2 | Link messages BEGIN/DATA/FINISH/ABORT with acks, writer on the S32K, checks of d), confirm logic, a PC script through the ESP32 | 2–3 |
 | 3 | `/miv/api/s32k/ota/*` on the ESP32 and the second field in the Update view, progress | 1 |
-| 4 | On the boards: full cycle, broken image (wrong hash, image that hangs) → back to the old one, power off during transfer and during the swap, update refused with contactors closed | 1–2 |
+| 4 | On the boards: full cycle; broken image (wrong hash, ESP32 file, image of another board id) refused; image that hangs in its very first lines (before `be_wdt_start`) → reset by the bootloader's watchdog and back to the old one; image with a broken link → not confirmed, back after 5 min; ESP32 off after the restart; power off during transfer and during the swap; update refused with contactors closed and without the web password | 1–2 |
 | | **Total** | **about 6–9 working days** |
 
 A commit (no push) after every step, with measurements.
