@@ -1,0 +1,11 @@
+# ProDINo ESP32 Ethernet v15 (8 MB), s32k/OTA_PLAN.md section 5: two 3 MB app slots and two store slots
+# for S32K images (912 KB each: a 4 KB header of our own + up to 908 KB of image). A different table needs
+# one serial upload (OTA cannot change it).
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xe000,   0x2000,
+app0,     app,  ota_0,   0x10000,  0x300000,
+app1,     app,  ota_1,   0x310000, 0x300000,
+coredump, data, coredump,0x610000, 0x10000,
+s32k_a,   data, 0x40,    0x620000, 0xE4000,
+s32k_b,   data, 0x40,    0x704000, 0xE4000,

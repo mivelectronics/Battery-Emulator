@@ -14,11 +14,21 @@ interfaces are served by the S32K over the link UART (bridge mode, can_link.h).
 - LED: WS2812 on GPIO0 (strapping pin; the LED's data line is a load only).
 - Button B1 on IO15.
 - Link to the S32K: UART1 (UART2 is the RS485), TX IO17 (J11 pin 4), RX I39 (J11 pin 7), see FIRMWARE_PLAN.md.
+
+With -D MIV_PRODINO_V15: KMP ProDINo ESP32 Ethernet v15 (ProDINoESP32-ETHv15.PrjPcb), ESP32-WROOM-32 with
+8 MB flash, powered from 8-30 V only (USB is an FT231X for the serial port). Same W5500, RS485, WS2812 and
+link TX pins; the I/O expander is an MCP23S08 (CS IO32, INT I36: 4 relays, 4 inputs), held deselected;
+the link RX is IO13 (J14 pin 11, GND on J11 pin 6 or J14 pin 1/3); no button on IO15 (only RESET and
+FLASH on GPIO0), so no AP button. Partition table miv_8MB.csv with two store slots for S32K images.
 */
 
 class MivEsp32EthHal : public Esp32Hal {
  public:
+#ifdef MIV_PRODINO_V15
+  const char* name() { return "ProDINo ESP32 Ethernet v15"; }
+#else
   const char* name() { return "MIV ESP32ETH_8R8I (W5500)"; }
+#endif
 
   virtual void set_default_configuration_values() {}
 
@@ -32,7 +42,9 @@ class MivEsp32EthHal : public Esp32Hal {
   virtual uint8_t LED_MAX_BRIGHTNESS() { return 40; }
 
   // Momentary push-button that can be long-pressed at runtime to start the Wi-Fi AP.
+#ifndef MIV_PRODINO_V15
   virtual gpio_num_t AP_BUTTON_PIN() { return GPIO_NUM_15; }
+#endif
 
   // W5500 Ethernet and the link UART: see hw_miv_esp32eth_pins.h
 
