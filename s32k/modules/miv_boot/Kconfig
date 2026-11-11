@@ -8,3 +8,16 @@ config MIV_BOOT_HOOKS
 	  the speculative access hang (NXP ERR011573), and SWT0 started by MCUboot with a 10 s timeout and
 	  fed during long flash work, so that an image which hangs before it starts its own watchdog is
 	  reset and swapped back.
+
+config MIV_BOOT_SLOW_SWAP
+	bool "Test build: a slow, visible swap for the power-cut tests"
+	depends on MIV_BOOT_HOOKS
+	help
+	  Never in a release. Slows every step of a swap down and blinks the red LED during it, so that the
+	  power can be cut in the middle of a swap by hand (miv_boot_slow_swap.c, slow_swap.conf,
+	  tools/build_ota.sh prodslow). Needs CONFIG_MCUBOOT_ACTION_HOOKS.
+
+config MIV_BOOT_SLOW_SWAP_US
+	int "Wait per swap step, us"
+	depends on MIV_BOOT_SLOW_SWAP
+	default 3000

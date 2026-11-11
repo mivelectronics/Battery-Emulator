@@ -10,6 +10,8 @@
  */
 #include <soc.h>
 
+#include "miv_boot.h"
+
 #define SWT_CLOCK_HZ     32000U /* SIRC */
 #define BOOT_TIMEOUT_MS  10000U
 #define SWT_SERVICE_KEY1 0xA602U
@@ -31,6 +33,9 @@ void mcuboot_watchdog_setup(void)
 
 void mcuboot_watchdog_feed(void)
 {
+#ifdef CONFIG_MIV_BOOT_SLOW_SWAP
+	miv_boot_slow_swap_step(); /* test build only */
+#endif
 	SWT_0->SR = SWT_SERVICE_KEY1;
 	SWT_0->SR = SWT_SERVICE_KEY2;
 }
