@@ -800,7 +800,15 @@ static void ota_chunk_body(AsyncWebServerRequest* request, uint8_t* data, size_t
     ota_req_offset = param_u32(request, "offset");
     s32k_ota_state s;
     s32k_ota_get(&s);
-    ota_req_status = ota_req_offset != s.received ? S32K_OTA_E_OFFSET : s32k_ota_room() < total ? -EAGAIN : 0;
+    // "Send it again" (503) only while the transfer runs: after a failure the buffer stays full, and the
+    // piece gets the error from s32k_ota_chunk() instead (the page would otherwise repeat it for ever)
+    if (ota_req_offset != s.received) {
+      ota_req_status = S32K_OTA_E_OFFSET;
+    } else if (s.phase == S32K_OTA_SENDING && s32k_ota_room() < total) {
+      ota_req_status = -EAGAIN;
+    } else {
+      ota_req_status = 0;
+    }
   }
   if (ota_req == request && ota_req_status == 0) {
     ota_req_status = s32k_ota_chunk(ota_req_offset + index, data, len);
