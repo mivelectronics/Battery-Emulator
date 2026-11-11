@@ -68,3 +68,38 @@ What this stand-in does NOT cover, against a real power cut:
 - the ESP32 side staying up in all three runs (tests 2 and 6 cut the ESP32).
 In this test (the transfer) the S32K writes slot 1 only, and MCUboot ignores slot 1 without the trailer magic,
 so a torn write there could not do more than the halt did; the real cut matters most for tests 3–5 (the swap).
+
+### Tests 2-6 by STAND-INS (11.11.2026): resets, the power was NOT cut
+
+`tools/ota_cut_tests.py COM13 COM46 <esp32 ip> <images dir> <log> [tests]` runs them one after the other with
+nobody at the boards, each cut set off by an event (the bytes sent, a line of the S32K console), and stops at
+the first test that does not pass. The cuts:
+- S32K: halted by the PEmicro debugger server, held 3 s (5 s in test 6), then reset into a run by gdb;
+- ESP32: EN held low through RTS of its USB serial port (COM46, DTR off so IO0 stays high), 3 s (5 s in test 6).
+Log: `41_battery_emulator/power_tests/tests2-6_20261111.log` (outside the repo). Before: 0.7.0 confirmed.
+
+| # | Stand-in cut, set off by | Result | Evidence (log) |
+|---|---|---|---|
+| 2 | ESP32 EN low 3 s at 46 % of 0.7.1 | passed | 15:04:09 S32K "update: no data for 10 s (0), restarting into the running image"; 15:04:11 "Swap type: none", "image 0.7.0: confirmed"; ESP32 back (uptime 3 s), transfer idle, store: 0.7.0 current, the other slot empty |
+| 3 | S32K halted 15 s into the slowed swap of 0.7.2 ("swap starts, slowed down") | passed | 15:04:50 "Boot source: primary slot", "Starting swap using move algorithm" with no "swap starts, slowed down": the resumed swap took 1.2 s (to 15:04:51 "Image version: v0.7.2"); "image 0.7.2: test image, not confirmed"; 15:05:51 "image confirmed: 0"; page: installed; store 0.7.2 current, 0.7.0 previous |
+| 4 | S32K halted 20 s after "image 0.7.3: test image, not confirmed" | passed | 15:07:37 "Swap type: revert", "swap starts, slowed down"; 15:08:18 "swap done, 3950 steps", "Image version: v0.7.2", "image 0.7.2: confirmed", "update to 0.7.3 did not confirm: the previous image is back"; page: 0.7.3 reverted; store: 0.7.2 current, 0.7.3 not taken |
+| 5 | as 4 with 0.7.4, then halted again 15 s into that swap back | passed | 15:09:40 "Swap type: revert", slowed; 15:10:02 the swap back resumed, not slowed, 1.6 s (to 15:10:03 "Image version: v0.7.2"); "image 0.7.2: confirmed", "update to 0.7.4 did not confirm"; page: 0.7.4 reverted; store: 0.7.2 current (the 0.7.4 copy read 0.2 s after the result, still "on test": not seen marked "not taken" as in test 4) |
+| 6 | both at 46 % of 0.7.5: ESP32 EN low 5 s, S32K halted 5 s | passed | 15:10:18 "Swap type: none", "Image version: v0.7.2", "image 0.7.2: confirmed"; ESP32 back; store: 0.7.2 current, the other slot empty |
+| final | 0.7.5 all the way | passed | transfer 10.9 s, swap 41.0 s, 15:11:14 "test image, not confirmed", 15:12:14 "image confirmed: 0"; page: installed; store 0.7.5 current, 0.7.2 previous |
+
+A first run stopped at test 3 on a check of the harness, not of the firmware: it read the ESP32 store 0.1 s after
+the "installed" result, before the ESP32 marked its copy current (it did, read again a minute later); the check
+now waits up to 10 s, and tests 4-6 and the final update ran after that.
+
+### What the stand-ins do NOT cover (left for real cuts with Dimitar)
+
+- **The supply going down during a flash write or erase.** A halted core lets a program or erase that the flash
+  controller has started complete; a real cut can leave a word or a sector half written. MCUboot's swap status
+  and the trailers are written for that case, and that is exactly what a real cut in tests 3 and 5 tests.
+- **Brown-out**: the voltage falling slowly, the LVD/POR thresholds, the core running on a sagging supply.
+- **Both boards losing the power at the same instant** (one supply): test 6 cut them within the same second,
+  but from two separate signals, with the ESP32 USB and the FRDM OpenSDA still powered.
+- **The state of RAM and the peripherals**: a debugger or EN reset can keep the RAM content and leaves part of the
+  peripherals as they were (a functional or EN reset, not a power-on reset); the start from cold (POR, the
+  clocks and the PLL, the W5500 and the flash of the ESP32 from zero) is not tested.
+- **The OpenSDA / USB going away**: the console port and the debugger stay up all the time.
