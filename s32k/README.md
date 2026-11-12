@@ -11,6 +11,12 @@ The two talk over a UART with the protocol in `Software/src/communication/link/b
   The S32K312 is the same die as the MCX E317, so the board is built on Zephyr's MCXE31x SoC support
   (own `nxp_s32k312.dtsi`, because `nxp_mcxe317.dtsi` in Zephyr v4.5.0 refers to a missing label).
   Core 120 MHz from the 16 MHz crystal; console on LPUART6 (OpenSDA virtual COM).
+- `boards/miv/miv_be_main/` — Zephyr board for the MIV main board be_main (schematic r13, `hw/be_main`): four CAN
+  (two isolated inverter ports, the battery ports with TJA1448 standby), RS485, six VNQ7140AJ outputs with
+  MultiSense, BMS supply switches, the socket for the ESP32 board. Same chip and start-up as the FRDM (it uses the
+  FRDM's SoC devicetree, board.c and boot header). Pins and what is not checked: `boards/miv/miv_be_main/PINS.md`.
+  The board does not exist yet: built only. Build with `-b miv_be_main`; OTA images with
+  `BOARD=miv_be_main tools/build_ota.sh <variant>`.
 - `app/bringup/` — clocks, LED, CAN0 FD loopback and normal mode, 10 ms timer jitter.
   Result on hardware: `app/bringup/bringup_2026-11-03.log`.
 - `app/link_bridge/` — bridge mode: CAN0/CAN1/CAN4 <-> link UART (LPUART4). The ESP32 side is

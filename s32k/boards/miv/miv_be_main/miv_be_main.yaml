@@ -1,0 +1,14 @@
+identifier: miv_be_main
+name: MIV Battery-Emulator main board
+type: mcu
+arch: arm
+ram: 64
+flash: 2048
+toolchain:
+  - zephyr
+supported:
+  - can
+  - gpio
+  - uart
+  - adc
+vendor: miv

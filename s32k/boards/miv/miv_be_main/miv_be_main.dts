@@ -1,0 +1,431 @@
+/*
+ * MIV Battery-Emulator main board (be_main), schematic r13 (11.11.2026): S32K312 in HDQFP-172.
+ * The pins are those of the schematic (hw/be_main, hw/out/be_main_schematic_r13.pdf); PINS.md lists
+ * every one with its sheet and what is not checked. The board has not been built yet: this file is
+ * checked by building only.
+ *
+ * Everything the FRDM-A-S32K312 has on board and this board does not (the TJA1043 on CAN0 with
+ * EN PTC21 / STB_N PTC20 / ERR_N PTC23, the user buttons, OpenSDA) is left out: on this board
+ * PTC20 / PTC21 / PTC23 are HS_SEL0..2 of the VNQ7140AJ MultiSense.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+/dts-v1/;
+
+/* Same die as the FRDM: its SoC devicetree (the MCX E317 one with the flash fixed) */
+#include "../../nxp/frdm_a_s32k312/nxp_s32k312.dtsi"
+#include "miv_be_main-pinctrl.dtsi"
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/adc/adc.h>
+
+/ {
+	model = "MIV Battery-Emulator main board (be_main r13)";
+	compatible = "miv,be-main";
+
+	/*
+	 * led0 / led1 / led2 are what the FRDM calls red / green / blue: MCUboot blinks led0 while it
+	 * swaps images and lights led2 while it runs, the application blinks led1.
+	 */
+	aliases {
+		led0 = &led_err;
+		led1 = &led_link;
+		led2 = &led_can;
+		be-link = &lpuart_4;
+		be-multisense = &hs_adc;
+	};
+
+	chosen {
+		zephyr,sram = &sram;
+		zephyr,itcm = &itcm;
+		zephyr,dtcm = &dtcm;
+		zephyr,flash = &flash0;
+		zephyr,code-partition = &code_partition;
+		zephyr,console = &lpuart_6;
+		zephyr,shell-uart = &lpuart_6;
+		zephyr,canbus = &flexcan_0;
+	};
+
+	/* Sheet 02: anode through 1 k to 3V3, cathode on the pin: active low (as on the FRDM) */
+	leds {
+		compatible = "gpio-leds";
+
+		/* D20, yellow, PTA29 (pin 32) */
+		led_can: led-can {
+			gpios = <&gpioa_h 13 GPIO_ACTIVE_LOW>;
+			label = "CAN LED";
+		};
+
+		/* D21, green, PTA30 (pin 33) */
+		led_link: led-link {
+			gpios = <&gpioa_h 14 GPIO_ACTIVE_LOW>;
+			label = "LINK LED";
+		};
+
+		/* D22, red, PTA31 (pin 39) */
+		led_err: led-err {
+			gpios = <&gpioa_h 15 GPIO_ACTIVE_LOW>;
+			label = "ERR LED";
+		};
+	};
+
+	/*
+	 * Battery CAN transceiver U3, TJA1448A (sheet 03): STBx HIGH = standby, LOW = normal, 10 k to 3V3
+	 * (R56, R57), so the transceivers stay in standby through a reset until the CAN driver starts the
+	 * channel. The driver sets standby at its start and normal in can_start().
+	 */
+	can_phy1: can-phy1 {
+		compatible = "nxp,tja1448", "can-transceiver-gpio";
+		/* CAN1_STB, PTC19 (pin 84; r13, was PTE21) -> U3 pin 14 (STB1) */
+		standby-gpios = <&gpioc_h 3 GPIO_ACTIVE_HIGH>;
+		max-bitrate = <5000000>;
+		#phy-cells = <0>;
+	};
+
+	can_phy4: can-phy4 {
+		compatible = "nxp,tja1448", "can-transceiver-gpio";
+		/* CAN4_STB, PTE22 (pin 154) -> U3 pin 8 (STB2) */
+		standby-gpios = <&gpioe_h 6 GPIO_ACTIVE_HIGH>;
+		max-bitrate = <5000000>;
+		#phy-cells = <0>;
+	};
+
+	/*
+	 * The other GPIO lines of the schematic, by their net names. Outputs that the Battery-Emulator
+	 * core does not drive are set off by the application at start (output-off-at-start). OUT1..OUT4
+	 * and BMS_POWER are the core's (app/emulator/boards/miv_be_main.overlay): until it takes them they
+	 * stay undriven and the 100 k pull-downs (R30..R33, R36) keep the VNQ7140AJ channels off.
+	 */
+	board_lines: board-lines {
+		compatible = "miv,gpio-lines";
+
+		/* Sheet 06, outputs through U10 / U11 (VNQ7140AJ), 15 k in series, 100 k to GND */
+		out1: out1 {
+			/* OUT1_EN, PTA0 (pin 137): battery 1 plus, U10 IN0, J9-1 */
+			gpios = <&gpioa_l 0 GPIO_ACTIVE_HIGH>;
+		};
+
+		out2: out2 {
+			/* OUT2_EN, PTA1 (pin 135): battery 1 minus, U10 IN1, J9-2 */
+			gpios = <&gpioa_l 1 GPIO_ACTIVE_HIGH>;
+		};
+
+		out3: out3 {
+			/* OUT3_EN, PTA3 (pin 123): battery 1 precharge, U10 IN2, J9-3 */
+			gpios = <&gpioa_l 3 GPIO_ACTIVE_HIGH>;
+		};
+
+		out4: out4 {
+			/* OUT4_EN, PTA2 (pin 124): battery 2 plus, U10 IN3, J9-4 */
+			gpios = <&gpioa_l 2 GPIO_ACTIVE_HIGH>;
+		};
+
+		out5: out5 {
+			/* OUT5_EN, PTC6 (pin 141): battery 2 minus, U11 IN0, J9-5 */
+			gpios = <&gpioc_l 6 GPIO_ACTIVE_HIGH>;
+			output-off-at-start;
+		};
+
+		out6: out6 {
+			/* OUT6_EN, PTC7 (pin 140): battery 2 precharge, U11 IN1, J9-6 */
+			gpios = <&gpioc_l 7 GPIO_ACTIVE_HIGH>;
+			output-off-at-start;
+		};
+
+		/* Sheet 06, BMS supply and ignition through U12 (VNQ7140AJ) */
+		bms_power: bms-power {
+			/* BMS_POWER = IG3, PTD18 (pin 105): U12 IN1; JP10 1-2 also IG3_2 */
+			gpios = <&gpiod_h 2 GPIO_ACTIVE_HIGH>;
+		};
+
+		bms_power2: bms-power2 {
+			/* BMS_POWER2, PTD20 (pin 111): IG3_2 through JP10 2-3 (U12 IN3) */
+			gpios = <&gpiod_h 4 GPIO_ACTIVE_HIGH>;
+			output-off-at-start;
+		};
+
+		bms12_en: bms12-en {
+			/* BMS12_EN, PTD22 (pin 118): +12V_BMS, U12 IN0. Off until the firmware turns it on
+			 * (R94 pull-up not fitted, R46 100 k to GND)
+			 */
+			gpios = <&gpiod_h 6 GPIO_ACTIVE_HIGH>;
+			output-off-at-start;
+		};
+
+		bms12_en2: bms12-en2 {
+			/* BMS12_EN2, PTD23 (pin 122): +12V_BMS2, U12 IN2 (R95 not fitted, R47 100 k to GND) */
+			gpios = <&gpiod_h 7 GPIO_ACTIVE_HIGH>;
+			output-off-at-start;
+		};
+
+		/* Sheet 06, MultiSense of U10..U12, each line 15 k in series; the sense voltage on hs_adc */
+		hs_sel0: hs-sel0 {
+			/* HS_SEL0, PTC20 (pin 85): SEL0 of U10..U12 */
+			gpios = <&gpioc_h 4 GPIO_ACTIVE_HIGH>;
+			output-off-at-start;
+		};
+
+		hs_sel1: hs-sel1 {
+			/* HS_SEL1, PTC21 (pin 86) */
+			gpios = <&gpioc_h 5 GPIO_ACTIVE_HIGH>;
+			output-off-at-start;
+		};
+
+		hs_sel2: hs-sel2 {
+			/* HS_SEL2, PTC23 (pin 87) */
+			gpios = <&gpioc_h 7 GPIO_ACTIVE_HIGH>;
+			output-off-at-start;
+		};
+
+		hs_sen_a: hs-sen-a {
+			/* HS_SEN_A, PTE23 (pin 156): SEn of U10 (MultiSense on the shared line when high) */
+			gpios = <&gpioe_h 7 GPIO_ACTIVE_HIGH>;
+			output-off-at-start;
+		};
+
+		hs_sen_b: hs-sen-b {
+			/* HS_SEN_B, PTE26 (pin 164): SEn of U11 */
+			gpios = <&gpioe_h 10 GPIO_ACTIVE_HIGH>;
+			output-off-at-start;
+		};
+
+		hs_sen_c: hs-sen-c {
+			/* HS_SEN_C, PTA9 (pin 171): SEn of U12 */
+			gpios = <&gpioa_l 9 GPIO_ACTIVE_HIGH>;
+			output-off-at-start;
+		};
+
+		hs_frst: hs-frst {
+			/* HS_FRST, PTD21 (pin 115): FaultRST of U10..U12. Low (as their internal pull-down holds
+			 * it with the pin undriven) = channels restart by themselves after a fault
+			 */
+			gpios = <&gpiod_h 5 GPIO_ACTIVE_HIGH>;
+			output-off-at-start;
+		};
+
+		/*
+		 * Sheet 02, STOP input PTC29 (pin 99): R24 10 k to 3V3, R25 1 k, C35 100 n, the contact from
+		 * J1-6 to GND (J1-7). Active low: the normally closed contact holds the pin low, so pressed
+		 * or a broken wire reads as "not closed". The core reads the line in its logical sense (on
+		 * the FRDM the button is wired to 3.3 V with an internal pull-down instead).
+		 */
+		stop_in: stop-in {
+			gpios = <&gpioc_h 13 GPIO_ACTIVE_LOW>;
+		};
+
+		/*
+		 * Sheet 07, control of the ESP32 board on socket J13. ESP_EN pulls EN of the ESP32-S3 low
+		 * (10 k / 1 uF there, 1 k in series): open drain, never driven high; the GPIO driver has no
+		 * open drain, so it is driven low or left as an input. Not touched at start.
+		 */
+		esp_en: esp-en {
+			/* ESP_EN, PTD16 (pin 34), J13-7 */
+			gpios = <&gpiod_h 0 GPIO_ACTIVE_LOW>;
+		};
+
+		esp_boot: esp-boot {
+			/* ESP_BOOT, PTD17 (pin 31), J13-8, IO0 of the ESP32-S3 (10 k pull-up there). As ESP_EN */
+			gpios = <&gpiod_h 1 GPIO_ACTIVE_LOW>;
+		};
+
+		aux1: aux1 {
+			/* AUX1, PTD14 (pin 40), J13-9: no function yet */
+			gpios = <&gpiod_l 14 GPIO_ACTIVE_HIGH>;
+		};
+
+		aux2: aux2 {
+			/* AUX2, PTD15 (pin 35), J13-10: no function yet */
+			gpios = <&gpiod_l 15 GPIO_ACTIVE_HIGH>;
+		};
+	};
+};
+
+&flash0 {
+	partitions {
+		ranges;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		ivt_header: partition@0 {
+			compatible = "zephyr,mapped-partition";
+			label = "ivt-header";
+			reg = <0x00000000 0x100>;
+		};
+
+		code_partition: partition@100 {
+			compatible = "zephyr,mapped-partition";
+			label = "code-partition";
+			reg = <0x00000100 (DT_SIZE_K(1936) - 0x100)>;
+		};
+
+		/* Settings (NVS), last 64 KB of the usable code flash, as on the FRDM */
+		storage_partition: partition@1e4000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x001e4000 DT_SIZE_K(64)>;
+		};
+	};
+};
+
+/* S32K312 is rated for 120 MHz */
+&core0 {
+	clock-frequency = <DT_FREQ_M(120)>;
+};
+
+&gpioa_l {
+	status = "okay";
+};
+
+&gpioa_h {
+	status = "okay";
+};
+
+&gpiob_h {
+	status = "okay";
+};
+
+&gpioc_l {
+	status = "okay";
+};
+
+&gpioc_h {
+	status = "okay";
+};
+
+&gpiod_l {
+	status = "okay";
+};
+
+&gpiod_h {
+	status = "okay";
+};
+
+&gpioe_h {
+	status = "okay";
+};
+
+&lpuart_6 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&pinmux_lpuart_6>;
+	pinctrl-names = "default";
+};
+
+&lpuart_4 {
+	status = "okay";
+	current-speed = <2000000>;
+	pinctrl-0 = <&pinmux_lpuart_4>;
+	pinctrl-names = "default";
+};
+
+/* RS485 (U4 ST3485, J1-3 A / J1-4 B). The port is described here, the application turns it on */
+&lpuart_7 {
+	pinctrl-0 = <&pinmux_lpuart_7>;
+	pinctrl-names = "default";
+
+	modbus0 {
+		compatible = "zephyr,modbus-serial";
+		/* RS485_DE, PTB17 (pin 110): DE and /RE of U4 */
+		de-gpios = <&gpiob_h 1 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+};
+
+/* CAN0, inverter 1: ISO1044B (no standby pin, always active) */
+&flexcan_0 {
+	pinctrl-0 = <&pinmux_flexcan_0>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+/* CAN1, battery 1 */
+&flexcan_1 {
+	pinctrl-0 = <&pinmux_flexcan_1>;
+	pinctrl-names = "default";
+	phys = <&can_phy1>;
+	status = "okay";
+};
+
+/* CAN2, inverter 2: ISO1044B like CAN0. The application has three channels so far and does not use it */
+&flexcan_2 {
+	pinctrl-0 = <&pinmux_flexcan_2>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+/* CAN4, battery 2 */
+&flexcan_4 {
+	pinctrl-0 = <&pinmux_flexcan_4>;
+	pinctrl-names = "default";
+	phys = <&can_phy4>;
+	status = "okay";
+};
+
+/*
+ * MultiSense of U10..U12 (sheet 06): HS_ADC on PTA8 (pin 172) = ADC0_P2, precise input 2 of ADC0
+ * (NXP IO signal table; an analog input has no mux setting, the pin stays a disabled input after
+ * reset). MultiSense current into R42 1 k to GND (HS_SENSE), then R43 15 k / R44 12 k to HS_ADC,
+ * C83 10 nF. Reference VREFH = 3V3 through FB2.
+ * Only described: nothing reads it yet.
+ */
+&adc_0 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	hs_adc: channel@0 {
+		reg = <0>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_VDD_1";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+		zephyr,input-positive = <2>;
+	};
+};
+
+/*
+ * Clocks as on the FRDM: Y1 16 MHz crystal, CL 8 pF (sheet 02) -> PLL VCO 960 MHz -> PHI0 120 MHz.
+ * CORE 120, AIPS_PLAT 60 (FlexCAN0-2), AIPS_SLOW 30, HSE 60, DCM 30.
+ */
+&firc {
+	status = "okay";
+	firc-div = "UnDiv";
+};
+
+&fxosc {
+	status = "okay";
+	freq = <16000000>;
+	workmode = "crystal";
+	delay = <49>;
+	overdrive = <12>;
+};
+
+&pll {
+	status = "okay";
+	workmode = "Integer";
+	prediv = <2>;
+	postdiv = <2>;
+	multiplier = <120>;
+	fracloopdiv = <0>;
+	stepsize = <0>;
+	stepnum = <0>;
+	accuracy = "Accuracy9";
+	outdiv = <4 4>;
+};
+
+&mc_cgm {
+	status = "okay";
+	max-ido-change = <50>;
+	step-duration = <1>;
+	clk-src-freq = <120000000>;
+	mux-0-dc-0-div = <1>;
+	mux-0-dc-1-div = <2>;
+	mux-0-dc-2-div = <4>;
+	mux-0-dc-3-div = <2>;
+	mux-0-dc-4-div = <4>;
+	mux-0-dc-5-div = <4>;
+	mux-0-dc-6-div = <1>;
+	mux-1-dc-0-div = <1>;
+	mux-2-dc-0-div = <1>;
+	mux-10-dc-0-div = <4>;
+};

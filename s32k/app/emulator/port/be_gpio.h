@@ -1,6 +1,7 @@
 /*
  * The outputs and inputs of the Battery-Emulator core: upstream names them with the numbers in
- * hw_miv_s32k.h, these are the indices of the be-gpios list in the board overlay.
+ * hw_miv_s32k.h, these are the indices of the be-gpios (FRDM) or be-lines (be_main) list in the
+ * application's board overlay.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -24,7 +25,8 @@ void be_gpio_configure(uint8_t pin, bool output);
 void be_gpio_write(uint8_t pin, bool high);
 int be_gpio_read(uint8_t pin);
 
-/* Bit per pin: the level on the pad, 0 for pins not in use */
+/* Bit per pin: the level as the core reads it (the pad level, inverted for a line described active
+ * low), 0 for pins not in use */
 uint16_t be_gpio_levels(void);
 
 /*

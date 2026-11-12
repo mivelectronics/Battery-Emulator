@@ -1,0 +1,7 @@
+# MIV Battery-Emulator main board (be_main, schematic r13): S32K312 in HDQFP-172.
+# The S32K312 is the automotive twin of MCX E317, so the board is built on the in-tree MCXE31x SoC
+# support, like frdm_a_s32k312.
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+config BOARD_MIV_BE_MAIN
+	select SOC_PART_NUMBER_MCXE317MPB

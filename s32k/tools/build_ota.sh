@@ -11,8 +11,10 @@
 #          prodslow = TEST ONLY, never a release: prod with a MCUboot that logs on the console and swaps
 #                 slowly with the red LED blinking (s32k/modules/miv_boot/slow_swap.conf), for cutting the
 #                 power in the middle of a swap by hand
-# Output in $ZW/b/ota_<variant>: mcuboot/zephyr/zephyr.elf (bootloader, with the boot header) and
-# emulator/zephyr/zephyr.signed.hex / .signed.bin (the application image for slot 0 or slot 1).
+# Board: frdm_a_s32k312, or another one with BOARD=<board> (miv_be_main); the image carries the board name.
+# Output in $ZW/b/ota_<variant> (FRDM) or $ZW/b/ota_<board>_<variant>: mcuboot/zephyr/zephyr.elf (bootloader,
+# with the boot header) and emulator/zephyr/zephyr.signed.hex / .signed.bin (the application image for slot 0
+# or slot 1).
 set -eu
 VARIANT="${1:?variant: mb, prod, sim, link, linksim or prodslow}"
 shift
@@ -36,7 +38,11 @@ case "$VARIANT" in
   *) echo "unknown variant $VARIANT"; exit 2 ;;
 esac
 
-west build --sysbuild -b frdm_a_s32k312 -d "$ZW/b/ota_$VARIANT" "$APP" "$@" -- \
+BOARD="${BOARD:-frdm_a_s32k312}"
+OUT="$ZW/b/ota_$VARIANT"
+[ "$BOARD" = frdm_a_s32k312 ] || OUT="$ZW/b/ota_${BOARD}_$VARIANT"
+
+west build --sysbuild -b "$BOARD" -d "$OUT" "$APP" "$@" -- \
   -DBOARD_ROOT="$S32K" \
   -DEXTRA_ZEPHYR_MODULES="$S32K/modules/miv_boot" \
   "-Demulator_EXTRA_DTC_OVERLAY_FILE=$OVL" \

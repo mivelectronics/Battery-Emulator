@@ -4,8 +4,9 @@
 /*
 MIV variant A+: the Battery-Emulator core running on an NXP S32K312 under Zephyr (s32k/app/emulator).
 There are no ESP32 pins here. CAN goes through the S32K FlexCAN channels (s32k/app/emulator/port). The
-numbers below are indices of the be-gpios list in s32k/app/emulator/boards/frdm_a_s32k312.overlay, which
-says which pin and header each one is. Everything else stays at the base class default GPIO_NUM_NC.
+numbers below are indices of the pin list in the board overlay of s32k/app/emulator/boards: be-gpios in
+frdm_a_s32k312.overlay, be-lines (lines named in the board devicetree) in miv_be_main.overlay. Everything
+else stays at the base class default GPIO_NUM_NC.
 */
 
 class MivS32kHal : public Esp32Hal {

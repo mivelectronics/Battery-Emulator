@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+description: |
+  The GPIO lines of a MIV board, each child one signal of the schematic, named as there. The
+  application takes the lines by their labels instead of port and pin numbers.
+
+compatible: "miv,gpio-lines"
+
+child-binding:
+  description: One GPIO line of the board
+  properties:
+    gpios:
+      type: phandle-array
+      required: true
+    output-off-at-start:
+      type: boolean
+      description: |
+        Driven to its inactive level by the application at start (s32k/app/emulator/src/board_lines.c).
+        Without it the line stays as the reset leaves it (input, not driven) until a driver takes it.

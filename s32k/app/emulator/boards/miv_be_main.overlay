@@ -1,0 +1,42 @@
+/*
+ * The emulator on the MIV be_main board. The pins are the board's (boards/miv/miv_be_main): here only
+ * which lines the Battery-Emulator core gets and how the application uses the ports.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+/ {
+	chosen {
+		zephyr,settings-partition = &storage_partition;
+	};
+
+	/*
+	 * Lines of the Battery-Emulator core, in the order of hw_miv_s32k.h (the FRDM overlay lists the
+	 * same functions as be-gpios). The core drives the outputs active high and reads the stop input
+	 * in its logical sense (active low on this board).
+	 */
+	zephyr,user {
+		be-lines = <&out1>,      /* 0 positive contactor, OUT1 */
+			   <&out2>,      /* 1 negative contactor, OUT2 */
+			   <&out3>,      /* 2 precharge, OUT3 */
+			   <&out4>,      /* 3 battery 2 contactor, OUT4 */
+			   <&bms_power>, /* 4 BMS power, IG3 */
+			   <&stop_in>;   /* 5 stop button input */
+	};
+};
+
+/* Modbus RTU server on RS485 (the modbus node with its DE pin is the board's) */
+&lpuart_7 {
+	status = "okay";
+	current-speed = <19200>;
+};
+
+/* Link UART to the ESP32 on DMA. Requests 42/43 are LPUART4 TX/RX on DMAMUX1 (channels 6-11). */
+&edma {
+	status = "okay";
+};
+
+&lpuart_4 {
+	dmas = <&edma 8 42>, <&edma 9 43>;
+	dma-names = "tx", "rx";
+};

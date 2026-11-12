@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+if BOARD_MIV_BE_MAIN
+
+endif # BOARD_MIV_BE_MAIN

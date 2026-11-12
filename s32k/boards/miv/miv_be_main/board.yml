@@ -1,0 +1,6 @@
+board:
+  name: miv_be_main
+  full_name: MIV Battery-Emulator main board (be_main)
+  vendor: miv
+  socs:
+    - name: mcxe317

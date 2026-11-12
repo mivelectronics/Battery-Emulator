@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# The start-up code is the one of frdm_a_s32k312 (same chip, same MCUboot): board.c and the boot
+# header are taken from there (CMakeLists.txt), so the symbols are the same.
+
+config BOARD_MIV_BE_MAIN
+	select BOARD_EARLY_INIT_HOOK
+
+config BOARD_NXP_MCXE31X_BOOT_HEADER
+	bool "MCXE31x boot header support"
+	select SOC_NXP_MCXE31X_BOOT_HEADER
+	default y
+	help
+	  Include the MCXE31x boot header (IVT) in the image. Without MCUboot the application needs it;
+	  under MCUboot the boot header belongs to MCUboot (mcuboot_app.conf turns it off).
+
+config CLEAR_DESTRUCTIVE_RESET_FLAG
+	hex "Clear destructive reset flag"
+	default 0x0
+
+config CLEAR_FUNCTIONAL_RESET_FLAG
+	hex "Clear functional reset flag"
+	default 0x0

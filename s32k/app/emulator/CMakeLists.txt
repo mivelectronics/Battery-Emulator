@@ -17,6 +17,7 @@ target_sources(app PRIVATE
   src/be_ota.c
   src/be_sha256.c
   src/be_wdt.c
+  src/board_lines.c
   src/can_io.c
   src/link.c
   src/modbus_srv.c

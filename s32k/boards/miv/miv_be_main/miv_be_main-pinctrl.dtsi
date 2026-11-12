@@ -1,0 +1,112 @@
+/*
+ * MIV be_main pin mux, by schematic r13 (hw/be_main, sheet 02 and hw/out/be_main_schematic_r13.pdf).
+ * Every pin checked against the NXP S32K312 IO signal table (S32K312_IOMUX.xlsx), PINS.md.
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#include <nxp/mcx/mcxe/pinctrl/MCXE317MPB-pinctrl.h>
+
+&pinctrl {
+	/* LPUART6 -> console, J15 (1x3): PTA16 TX (pin 143), PTA15 RX (pin 145) */
+	pinmux_lpuart_6: pinmux_lpuart_6 {
+		group1 {
+			pinmux = <PTA16_LPUART6_TX_O>;
+			output-enable;
+		};
+
+		group2 {
+			pinmux = <PTA15_LPUART6_RX>;
+			input-enable;
+			/* nothing may be plugged into J15 */
+			bias-pull-up;
+		};
+	};
+
+	/*
+	 * LPUART4 -> link to the ESP32 board, socket J13: PTE11 TX = LINK_S2E (pin 9, J13-5),
+	 * PTE10 RX = LINK_E2S (pin 10, J13-6, R70 10 k to 3V3 on the board)
+	 */
+	pinmux_lpuart_4: pinmux_lpuart_4 {
+		group1 {
+			pinmux = <PTE11_LPUART4_TX_O>;
+			output-enable;
+		};
+
+		group2 {
+			pinmux = <PTE10_LPUART4_RX>;
+			input-enable;
+			/* R70 holds the line too; the ESP32 board is optional */
+			bias-pull-up;
+		};
+	};
+
+	/*
+	 * LPUART7 -> RS485 (U4 ST3485, sheet 05): PTB15 TX = RS485_DI (pin 113), PTB14 RX = RS485_RO
+	 * (pin 114). DE and /RE together on PTB17 (GPIO, the modbus node in miv_be_main.dts).
+	 */
+	pinmux_lpuart_7: pinmux_lpuart_7 {
+		group1 {
+			pinmux = <PTB15_LPUART7_TX_O>;
+			output-enable;
+		};
+
+		group2 {
+			pinmux = <PTB14_LPUART7_RX>;
+			input-enable;
+			/* RO is high impedance while /RE is high (sending) */
+			bias-pull-up;
+		};
+	};
+
+	/* FlexCAN0 -> CAN0, inverter 1: U2 ISO1044B, J8 (RJ45). PTA6 RX (pin 102), PTA7 TX (pin 100) */
+	pinmux_flexcan_0: pinmux_flexcan_0 {
+		group1 {
+			pinmux = <PTA6_CAN0_RX>;
+			input-enable;
+		};
+
+		group2 {
+			pinmux = <PTA7_CAN0_TX>;
+			output-enable;
+		};
+	};
+
+	/* FlexCAN1 -> CAN1, battery 1: U3 TJA1448A channel 1, J6. PTB23 RX (pin 69), PTB22 TX (pin 67) */
+	pinmux_flexcan_1: pinmux_flexcan_1 {
+		group1 {
+			pinmux = <PTB23_CAN1_RX>;
+			input-enable;
+		};
+
+		group2 {
+			pinmux = <PTB22_CAN1_TX>;
+			output-enable;
+		};
+	};
+
+	/* FlexCAN2 -> CAN2, inverter 2: U8 ISO1044B, J7 (RJ45). PTE25 RX (pin 158), PTE24 TX (pin 157) */
+	pinmux_flexcan_2: pinmux_flexcan_2 {
+		group1 {
+			pinmux = <PTE25_CAN2_RX>;
+			input-enable;
+		};
+
+		group2 {
+			pinmux = <PTE24_CAN2_TX>;
+			output-enable;
+		};
+	};
+
+	/* FlexCAN4 -> CAN4, battery 2: U3 TJA1448A channel 2, J5. PTB2 RX (pin 79), PTB3 TX (pin 74) */
+	pinmux_flexcan_4: pinmux_flexcan_4 {
+		group1 {
+			pinmux = <PTB2_CAN4_RX>;
+			input-enable;
+		};
+
+		group2 {
+			pinmux = <PTB3_CAN4_TX>;
+			output-enable;
+		};
+	};
+};

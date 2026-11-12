@@ -1,0 +1,2 @@
+# Vendor prefixes of this board's devicetree
+miv	MIV Electronics
