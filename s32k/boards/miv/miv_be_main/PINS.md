@@ -70,8 +70,8 @@ they are HS_SEL0..2. Nothing of the TJA1043 is in this board's devicetree. CAN0 
 - **Nothing on hardware.** The board does not exist; there were only builds.
 - **The stop input is inverted against the FRDM.** On the FRDM the contact goes to 3.3 V with an internal
   pull-down. Here R24 pulls up and the contact goes to GND. The line is described active low, and the core reads it
-  in its logical sense. A normally closed contact then behaves as on the FRDM: pressed or a broken wire = stop. If a
-  normally open contact is meant, the flag has to change.
+  in its logical sense. A normally closed contact then behaves as on the FRDM: pressed or a broken wire = stop. Dimitar
+  confirmed on 12.11.2026 that the stop button is normally closed, so the flag stays.
 - **MultiSense on PTA8:** the ADC0_P2 mux is checked against the NXP table. The hardware channel number 2 of the
   Zephyr `nxp,sar-adc` driver (precise inputs = channels 0..7 of group 0) is taken from the driver code, not
   measured. Nothing reads it. The reading, the SEL / SEn sequence and the diagnostics are a separate task.
